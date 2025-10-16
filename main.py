@@ -22,6 +22,7 @@ from bot import (
     ExpenseStates, InvestmentStates, SavingsStates, BudgetStates,
     check_payment_reminders
 )
+
 from handlers import (
     handle_add_debt, process_debt_person_name, process_debt_amount,
     process_debt_type, process_debt_description, show_user_debts,
@@ -51,6 +52,19 @@ from handlers import (
     cancel_handler
 )
 
+from credit_card_handlers import (
+    handle_credit_cards_menu, handle_add_credit_card,
+    process_card_name, process_card_bank_name, process_card_credit_limit,
+    process_card_interest_rate, process_card_minimum_payment_percent,
+    show_user_credit_cards, handle_add_money_to_card,
+    process_card_selection_for_repayment, process_card_repayment_amount,
+    handle_spend_from_card, process_card_selection_for_spending,
+    process_card_spending_amount, show_card_transactions,
+    cancel_credit_card_handler
+)
+
+from bot import CreditCardStates
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -62,12 +76,9 @@ logger = logging.getLogger(__name__)
 def register_all_handlers(dp: Dispatcher):
     """Регистрация всех обработчиков бота"""
     
-    # ==================== КОМАНДЫ ====================
     dp.message.register(cmd_start, Command("start"))
     dp.message.register(cmd_help, Command("help"))
     
-    # ==================== ГЛАВНОЕ МЕНЮ ====================
-    # ==================== ГЛАВНОЕ МЕНЮ ====================
     dp.message.register(
         handle_main_menu,
         F.text.in_([
@@ -76,6 +87,26 @@ def register_all_handlers(dp: Dispatcher):
             "📈 График капитала", "📋 Отчёт", "⚙️ Категории"
         ])
     )
+    
+    dp.message.register(handle_credit_cards_menu, F.text == "💳 Кредитные карты")
+    dp.message.register(handle_add_credit_card, F.text == "➕ Добавить карту")
+    dp.message.register(show_user_credit_cards, F.text == "📋 Мои карты")
+    dp.message.register(handle_add_money_to_card, F.text == "💰 Пополнить карту")
+    dp.message.register(handle_spend_from_card, F.text == "🛒 Потратить")
+    dp.message.register(show_card_transactions, F.text == "📊 История операций")
+    dp.message.register(handle_credit_cards_menu, F.text == "◀️ К кредитам")
+    
+    dp.message.register(process_card_name, CreditCardStates.waiting_card_name)
+    dp.message.register(process_card_bank_name, CreditCardStates.waiting_bank_name)
+    dp.message.register(process_card_credit_limit, CreditCardStates.waiting_credit_limit)
+    dp.message.register(process_card_interest_rate, CreditCardStates.waiting_interest_rate)
+    dp.message.register(process_card_minimum_payment_percent, CreditCardStates.waiting_minimum_payment_percent)
+    
+    dp.callback_query.register(process_card_selection_for_repayment, CreditCardStates.selecting_card_for_transaction)
+    dp.message.register(process_card_repayment_amount, CreditCardStates.waiting_transaction_amount)
+    
+    dp.callback_query.register(process_card_selection_for_spending, CreditCardStates.selecting_card_for_spending)
+    dp.message.register(process_card_spending_amount, CreditCardStates.waiting_spending_amount)
     
     # ==================== БЮДЖЕТ ====================
     # ==================== БЮДЖЕТ ====================
@@ -126,11 +157,11 @@ def register_all_handlers(dp: Dispatcher):
     # Callbacks для платежей
     dp.callback_query.register(
         process_credit_payment_callback,
-        StateFilter(CreditStates.selecting_credit_for_payment)
+        StateFilter(CreditStates.selecting_credit)
     )
     dp.callback_query.register(
         confirm_credit_payment,
-        StateFilter(CreditStates.confirming_payment)
+        StateFilter(CreditStates.entering_payment_amount)
     )
     
     # FSM для досрочного погашения
