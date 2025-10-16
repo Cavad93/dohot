@@ -172,7 +172,99 @@ class FinancialCalculator:
             'debts_taken': total_debts_taken,
             'total_liabilities': total_credits + total_debts_taken
         }
+
+    @staticmethod
+    def calculate_monthly_credit_expenses(credits: List[Dict], month: int, year: int) -> Dict:
+        """
+        Рассчитывает расходы по кредитам на конкретный месяц
+        
+        Args:
+            credits: Список кредитов
+            month: Месяц (1-12)
+            year: Год
+        
+        Returns:
+            Словарь с деталями расходов по кредитам
+        """
+        from datetime import date
+        from dateutil.relativedelta import relativedelta
+        
+        target_date = date(year, month, 1)
+        total_payment = 0
+        credit_details = []
+        
+        for credit in credits:
+            if not credit['is_active']:
+                continue
+            
+            start_date = datetime.strptime(credit['start_date'], '%Y-%m-%d').date()
+            end_date = start_date + relativedelta(months=credit['total_months'])
+            
+            # Проверяем, попадает ли кредит в этот месяц
+            if start_date <= target_date < end_date:
+                total_payment += credit['monthly_payment']
+                credit_details.append({
+                    'display_name': credit['display_name'],
+                    'monthly_payment': credit['monthly_payment'],
+                    'remaining_debt': credit['remaining_debt']
+                })
+        
+        return {
+            'total': total_payment,
+            'credits': credit_details,
+            'count': len(credit_details)
+        }
     
+    @staticmethod
+    def generate_budget_forecast(user_id: int, db, months_ahead: int = 6) -> List[Dict]:
+        """
+        Генерирует прогноз бюджета на несколько месяцев вперед
+        
+        Args:
+            user_id: ID пользователя
+            db: Экземпляр Database
+            months_ahead: Количество месяцев для прогноза
+        
+        Returns:
+            Список с прогнозом по месяцам
+        """
+        from datetime import date
+        from dateutil.relativedelta import relativedelta
+        
+        forecast = []
+        credits = db.get_user_credits(user_id)
+        
+        current_date = date.today()
+        
+        for i in range(months_ahead):
+            target_date = current_date + relativedelta(months=i)
+            month = target_date.month
+            year = target_date.year
+            
+            # Получаем существующий бюджет или создаем пустой
+            budget = db.get_budget(user_id, month, year)
+            
+            # Рассчитываем расходы по кредитам
+            credit_expenses = FinancialCalculator.calculate_monthly_credit_expenses(
+                credits, month, year
+            )
+            
+            forecast.append({
+                'month': month,
+                'year': year,
+                'month_name': target_date.strftime('%B %Y'),
+                'has_budget': budget is not None,
+                'planned_income': budget['planned_income'] if budget else 0,
+                'planned_expenses': budget['planned_expenses'] if budget else 0,
+                'credit_expenses': credit_expenses['total'],
+                'credit_details': credit_expenses['credits'],
+                'total_expenses': (budget['planned_expenses'] if budget else 0) + credit_expenses['total'],
+                'balance': (budget['planned_income'] if budget else 0) - 
+                          ((budget['planned_expenses'] if budget else 0) + credit_expenses['total'])
+            })
+        
+        return forecast
+
     @staticmethod
     def calculate_category_summary(incomes: List[Dict], expenses: List[Dict],
                                    categories: List[Dict]) -> Dict:
