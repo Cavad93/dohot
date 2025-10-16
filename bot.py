@@ -128,13 +128,14 @@ class BudgetStates(StatesGroup):
 
 # ==================== КЛАВИАТУРЫ ====================
 
-def get_main_menu_keyboard():
+def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
     keyboard = [
         [KeyboardButton(text="💳 Кредиты"), KeyboardButton(text="💸 Долги")],
         [KeyboardButton(text="💰 Доходы"), KeyboardButton(text="🛒 Расходы")],
         [KeyboardButton(text="📊 Инвестиции"), KeyboardButton(text="🏦 Сбережения")],
-        [KeyboardButton(text="📅 Бюджет"), KeyboardButton(text="📋 Отчёт")],
-        [KeyboardButton(text="📈 График капитала"), KeyboardButton(text="⚙️ Категории")]
+        [KeyboardButton(text="📈 График капитала"), KeyboardButton(text="📋 Отчёт")],
+        [KeyboardButton(text="📅 Бюджет"), KeyboardButton(text="📊 Аналитика")],
+        [KeyboardButton(text="⚙️ Категории")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
@@ -336,6 +337,27 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
     
     elif message.text == "⚙️ Категории":
         await show_categories_menu(message)
+    
+    elif message.text == "📊 Аналитика":
+        from handlers import show_analytics_menu
+        await show_analytics_menu(message)
+    
+    elif message.text == "📊 Подробный отчёт":
+        from handlers import generate_detailed_analytics
+        await generate_detailed_analytics(message)
+    
+    elif message.text == "📈 Все графики":
+        from handlers import generate_all_charts
+        await generate_all_charts(message)
+    
+    elif message.text == "💹 График баланса":
+        await show_balance_trend_chart(message)
+    
+    elif message.text == "🥧 Диаграмма расходов":
+        await show_expense_pie_chart(message)
+    
+    elif message.text == "📉 График кредитов":
+        await show_credits_timeline_chart(message)
     elif message.text == "🗑 Удалить последний доход":
         await handlers.handle_delete_last_income(message)
     elif message.text == "🗑 Удалить доход по ID":
@@ -721,3 +743,69 @@ async def show_categories_menu(message: types.Message):
         "Выберите, что добавить:",
         reply_markup=get_categories_menu_keyboard()
     )
+# ==================== ДОПОЛНИТЕЛЬНЫЕ ГРАФИКИ ====================
+
+async def show_balance_trend_chart(message: types.Message):
+    """График динамики баланса"""
+    from datetime import date, timedelta
+    
+    today = date.today()
+    start_date = (today - timedelta(days=30)).isoformat()
+    end_date = today.isoformat()
+    
+    incomes = db.get_user_incomes(message.from_user.id, start_date, end_date)
+    expenses = db.get_user_expenses(message.from_user.id, start_date, end_date)
+    
+    chart_path = chart_gen.generate_balance_trend(incomes, expenses, start_date, end_date)
+    
+    if chart_path:
+        photo = types.FSInputFile(chart_path)
+        await message.answer_photo(
+            photo=photo,
+            caption="💹 График динамики баланса за 30 дней"
+        )
+    else:
+        await message.answer("⚠️ Недостаточно данных для графика")
+
+
+async def show_expense_pie_chart(message: types.Message):
+    """Круговая диаграмма расходов"""
+    from datetime import date, timedelta
+    
+    today = date.today()
+    start_date = (today - timedelta(days=30)).isoformat()
+    end_date = today.isoformat()
+    
+    expenses = db.get_user_expenses(message.from_user.id, start_date, end_date)
+    categories = db.get_user_categories(message.from_user.id)
+    
+    chart_path = chart_gen.generate_expense_pie_chart(expenses, categories)
+    
+    if chart_path:
+        photo = types.FSInputFile(chart_path)
+        await message.answer_photo(
+            photo=photo,
+            caption="🥧 Топ-10 категорий расходов"
+        )
+    else:
+        await message.answer("⚠️ Недостаточно данных для графика")
+
+
+async def show_credits_timeline_chart(message: types.Message):
+    """График погашения кредитов"""
+    credits = db.get_user_credits(message.from_user.id)
+    
+    if not credits:
+        await message.answer("У вас нет активных кредитов")
+        return
+    
+    chart_path = chart_gen.generate_credits_timeline(credits)
+    
+    if chart_path:
+        photo = types.FSInputFile(chart_path)
+        await message.answer_photo(
+            photo=photo,
+            caption="📉 График погашения кредитов"
+        )
+    else:
+        await message.answer("❌ Ошибка при создании графика")
