@@ -30,7 +30,8 @@ from handlers import (
     handle_add_income, process_income_amount, process_income_category,
     process_income_description,
     handle_add_expense, process_expense_amount, process_expense_category,
-    process_expense_description,
+    process_expense_description,handle_delete_last_income, handle_delete_income_by_id,
+    handle_delete_last_expense,handle_delete_expense_by_id,
     handle_add_investment, process_investment_asset_name,
     process_investment_amount, show_user_investments,
     handle_update_investment_value, process_investment_selection,
@@ -154,12 +155,21 @@ def register_all_handlers(dp: Dispatcher):
     )
 
     # ==================== РАСХОДЫ ====================
+    # ==================== РАСХОДЫ ====================
     dp.message.register(handle_add_expense, F.text == "➕ Добавить расход")
     dp.message.register(show_user_expenses, F.text == "📋 Мои расходы")
+    # ↓↓↓ добавлено ↓↓↓
+    dp.message.register(handle_delete_last_expense, F.text == "🗑 Удалить последний расход")
+    dp.message.register(handle_delete_expense_by_id, F.text == "🗑 Удалить расход по ID")
+    # ↑↑↑ добавлено ↑↑↑
 
-    
     # ==================== ДОХОДЫ ====================
     dp.message.register(handle_add_income, F.text == "➕ Добавить доход")
+    # ↓↓↓ добавлено ↓↓↓
+    dp.message.register(handle_delete_last_income, F.text == "🗑 Удалить последний доход")
+    dp.message.register(handle_delete_income_by_id, F.text == "🗑 Удалить доход по ID")
+    # ↑↑↑ добавлено ↑↑↑
+
     
     # FSM для добавления дохода
     dp.message.register(process_income_amount, IncomeStates.waiting_amount)
