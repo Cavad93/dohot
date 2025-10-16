@@ -13,6 +13,7 @@ from datetime import datetime
 from aiogram import Router              # ← добавь
 router = Router()                       # ← добавь
 
+import calendar
 
 from database import Database
 from calculations import FinancialCalculator
@@ -968,6 +969,392 @@ async def cancel_handler(message: types.Message, state: FSMContext):
         "❌ Операция отменена",
         reply_markup=get_main_menu_keyboard()
     )
+
+# ==================== ОБРАБОТЧИКИ БЮДЖЕТА ====================
+
+async def handle_create_budget(message: types.Message, state: FSMContext):
+    """Начало создания бюджета"""
+    from datetime import date
+    from dateutil.relativedelta import relativedelta
+    
+    current_date = date.today()
+    months = []
+    
+    # Предлагаем выбрать один из следующих 12 месяцев
+    for i in range(12):
+        target_date = current_date + relativedelta(months=i)
+        months.append({
+            'month': target_date.month,
+            'year': target_date.year,
+            'name': target_date.strftime('%B %Y')
+        })
+    
+    keyboard = []
+    for month_data in months[:6]:  # Показываем первые 6
+        keyboard.append([InlineKeyboardButton(
+            text=month_data['name'],
+            callback_data=f"budget_month_{month_data['month']}_{month_data['year']}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(text="➡️ Ещё месяцы", callback_data="budget_more_months")])
+    keyboard.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+    
+    await message.answer(
+        "Выберите месяц для планирования бюджета:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(BudgetStates.selecting_month)
+
+
+async def process_budget_month_selection(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора месяца для бюджета"""
+    if callback.data == "cancel":
+        await callback.message.delete()
+        await state.clear()
+        await callback.message.answer(
+            "❌ Отменено",
+            reply_markup=get_budget_menu_keyboard()
+        )
+        return
+    
+    if callback.data == "budget_more_months":
+        # Показываем следующие 6 месяцев
+        from datetime import date
+        from dateutil.relativedelta import relativedelta
+        
+        current_date = date.today()
+        months = []
+        
+        for i in range(6, 12):
+            target_date = current_date + relativedelta(months=i)
+            months.append({
+                'month': target_date.month,
+                'year': target_date.year,
+                'name': target_date.strftime('%B %Y')
+            })
+        
+        keyboard = []
+        for month_data in months:
+            keyboard.append([InlineKeyboardButton(
+                text=month_data['name'],
+                callback_data=f"budget_month_{month_data['month']}_{month_data['year']}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="budget_back_months")])
+        keyboard.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+        
+        await callback.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+        return
+    
+    parts = callback.data.split("_")
+    month = int(parts[2])
+    year = int(parts[3])
+    
+    await state.update_data(month=month, year=year)
+    
+    # Получаем расходы по кредитам на этот месяц
+    credits = db.get_user_credits(callback.from_user.id)
+    credit_expenses = FinancialCalculator.calculate_monthly_credit_expenses(credits, month, year)
+    
+    await state.update_data(credit_expenses=credit_expenses['total'])
+    
+    # Проверяем, есть ли уже бюджет
+    existing_budget = db.get_budget(callback.from_user.id, month, year)
+    
+    info_text = f"📅 Планирование бюджета на {calendar.month_name[month]} {year}\n\n"
+    
+    if existing_budget:
+        info_text += "⚠️ На этот месяц уже есть бюджет. Вы можете его обновить.\n\n"
+    
+    info_text += f"💳 Расходы по кредитам: {credit_expenses['total']:,.2f} руб.\n"
+    
+    if credit_expenses['credits']:
+        info_text += "\nКредиты в этом месяце:\n"
+        for credit in credit_expenses['credits']:
+            info_text += f"  • {credit['display_name']}: {credit['monthly_payment']:,.2f} руб.\n"
+    
+    info_text += "\nВведите планируемый доход за месяц (в рублях):"
+    
+    await callback.message.delete()
+    await callback.message.answer(info_text, reply_markup=get_cancel_keyboard())
+    await state.set_state(BudgetStates.waiting_planned_income)
+
+
+async def process_planned_income(message: types.Message, state: FSMContext):
+    """Обработка планируемого дохода"""
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    
+    try:
+        planned_income = float(message.text.replace(",", "."))
+        await state.update_data(planned_income=planned_income)
+        
+        await message.answer(
+            "Введите планируемые расходы (без учета кредитов) в рублях:\n\n"
+            "Например, на продукты, транспорт, развлечения и т.д.",
+            reply_markup=get_cancel_keyboard()
+        )
+        await state.set_state(BudgetStates.waiting_planned_expenses)
+    except ValueError:
+        await message.answer("❌ Неверный формат! Введите число, например: 75000")
+
+
+async def process_planned_expenses(message: types.Message, state: FSMContext):
+    """Обработка планируемых расходов"""
+    if message.text == "❌ Отмена":
+        await cancel_handler(message, state)
+        return
+    
+    try:
+        planned_expenses = float(message.text.replace(",", "."))
+        data = await state.get_data()
+        
+        # Создаем или обновляем бюджет
+        budget_id = db.create_or_update_budget(
+            user_id=message.from_user.id,
+            month=data['month'],
+            year=data['year'],
+            planned_income=data['planned_income'],
+            planned_expenses=planned_expenses,
+            credit_expenses=data['credit_expenses']
+        )
+        
+        # Показываем результат
+        total_expenses = planned_expenses + data['credit_expenses']
+        balance = data['planned_income'] - total_expenses
+        balance_emoji = "✅" if balance >= 0 else "❌"
+        
+        result_text = f"""
+✅ Бюджет на {calendar.month_name[data['month']]} {data['year']} создан!
+
+💰 Планируемый доход: {data['planned_income']:,.2f} руб.
+
+📊 Расходы:
+  • Планируемые: {planned_expenses:,.2f} руб.
+  • Кредиты: {data['credit_expenses']:,.2f} руб.
+  • ИТОГО: {total_expenses:,.2f} руб.
+
+{balance_emoji} Баланс: {balance:,.2f} руб.
+"""
+        
+        await state.clear()
+        await message.answer(result_text, reply_markup=get_budget_menu_keyboard())
+    except ValueError:
+        await message.answer("❌ Неверный формат! Введите число, например: 45000")
+
+
+async def show_user_budgets(message: types.Message):
+    """Показ списка бюджетов пользователя"""
+    budgets = db.get_user_budgets(message.from_user.id)
+    
+    if not budgets:
+        await message.answer(
+            "У вас пока нет созданных бюджетов.\n"
+            "Используйте кнопку '➕ Создать бюджет'",
+            reply_markup=get_budget_menu_keyboard()
+        )
+        return
+    
+    text = "📋 Ваши бюджеты:\n\n"
+    
+    for i, budget in enumerate(budgets, 1):
+        total_expenses = budget['planned_expenses'] + budget['credit_expenses']
+        balance = budget['planned_income'] - total_expenses
+        balance_emoji = "✅" if balance >= 0 else "❌"
+        
+        text += f"{i}. {calendar.month_name[budget['month']]} {budget['year']}\n"
+        text += f"   💰 Доход: {budget['planned_income']:,.2f} руб.\n"
+        text += f"   📊 Расходы: {total_expenses:,.2f} руб.\n"
+        text += f"   {balance_emoji} Баланс: {balance:,.2f} руб.\n\n"
+    
+    keyboard = []
+    for budget in budgets[:10]:  # Показываем первые 10
+        keyboard.append([InlineKeyboardButton(
+            text=f"{calendar.month_name[budget['month']]} {budget['year']}",
+            callback_data=f"view_budget_{budget['id']}"
+        )])
+    keyboard.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="cancel")])
+    
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+
+async def show_budget_forecast(message: types.Message):
+    """Показ прогноза бюджета на 6 месяцев"""
+    forecast = FinancialCalculator.generate_budget_forecast(
+        message.from_user.id, db, months_ahead=6
+    )
+    
+    text = "📊 Прогноз бюджета на 6 месяцев\n\n"
+    
+    for period in forecast:
+        status = "✅" if period['has_budget'] else "➖"
+        balance_emoji = "✅" if period['balance'] >= 0 else "❌"
+        
+        text += f"{status} {period['month_name']}\n"
+        
+        if period['has_budget']:
+            text += f"   💰 Доход: {period['planned_income']:,.2f} руб.\n"
+            text += f"   📊 Расходы: {period['total_expenses']:,.2f} руб.\n"
+            text += f"     ├─ Планируемые: {period['planned_expenses']:,.2f} руб.\n"
+            text += f"     └─ Кредиты: {period['credit_expenses']:,.2f} руб.\n"
+            text += f"   {balance_emoji} Баланс: {period['balance']:,.2f} руб.\n"
+        else:
+            text += f"   💳 Кредиты: {period['credit_expenses']:,.2f} руб.\n"
+            if period['credit_details']:
+                for credit in period['credit_details']:
+                    text += f"     • {credit['display_name']}: {credit['monthly_payment']:,.2f} руб.\n"
+            text += f"   ⚠️ Бюджет не создан\n"
+        
+        text += "\n"
+    
+    await message.answer(text, reply_markup=get_budget_menu_keyboard())
+
+
+async def view_budget_details(callback: types.CallbackQuery, state: FSMContext):
+    """Показ деталей конкретного бюджета"""
+    if callback.data == "cancel":
+        await callback.message.delete()
+        await state.clear()
+        return
+    
+    budget_id = int(callback.data.split("_")[2])
+    
+    conn = db.get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM budget_plans WHERE id = ?", (budget_id,))
+    budget = cursor.fetchone()
+    conn.close()
+    
+    if not budget:
+        await callback.answer("Бюджет не найден", show_alert=True)
+        return
+    
+    budget = dict(budget)
+    
+    # Получаем актуальные расходы по кредитам
+    credits = db.get_user_credits(callback.from_user.id)
+    credit_expenses = FinancialCalculator.calculate_monthly_credit_expenses(
+        credits, budget['month'], budget['year']
+    )
+    
+    total_expenses = budget['planned_expenses'] + credit_expenses['total']
+    balance = budget['planned_income'] - total_expenses
+    balance_emoji = "✅" if balance >= 0 else "❌"
+    
+    text = f"📅 Бюджет на {calendar.month_name[budget['month']]} {budget['year']}\n\n"
+    text += f"💰 Планируемый доход: {budget['planned_income']:,.2f} руб.\n\n"
+    text += f"📊 Расходы:\n"
+    text += f"  • Планируемые: {budget['planned_expenses']:,.2f} руб.\n"
+    text += f"  • Кредиты: {credit_expenses['total']:,.2f} руб.\n"
+    
+    if credit_expenses['credits']:
+        for credit in credit_expenses['credits']:
+            text += f"    ├─ {credit['display_name']}: {credit['monthly_payment']:,.2f} руб.\n"
+    
+    text += f"\n  ИТОГО расходов: {total_expenses:,.2f} руб.\n\n"
+    text += f"{balance_emoji} Баланс: {balance:,.2f} руб.\n"
+    
+    if budget['notes']:
+        text += f"\n📝 Примечания:\n{budget['notes']}"
+    
+    keyboard = [
+        [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_budget_{budget_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_budget_{budget_id}")],
+        [InlineKeyboardButton(text="❌ Закрыть", callback_data="cancel")]
+    ]
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+
+async def edit_budget_callback(callback: types.CallbackQuery, state: FSMContext):
+    """Начало редактирования бюджета"""
+    budget_id = int(callback.data.split("_")[2])
+    
+    conn = db.get_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM budget_plans WHERE id = ?", (budget_id,))
+    budget = cursor.fetchone()
+    conn.close()
+    
+    if not budget:
+        await callback.answer("Бюджет не найден", show_alert=True)
+        return
+    
+    budget = dict(budget)
+    await state.update_data(
+        budget_id=budget_id,
+        month=budget['month'],
+        year=budget['year'],
+        credit_expenses=budget['credit_expenses']
+    )
+    
+    await callback.message.delete()
+    await callback.message.answer(
+        f"✏️ Редактирование бюджета на {calendar.month_name[budget['month']]} {budget['year']}\n\n"
+        f"Текущий доход: {budget['planned_income']:,.2f} руб.\n\n"
+        f"Введите новый планируемый доход (или 0 чтобы оставить текущий):",
+        reply_markup=get_cancel_keyboard()
+    )
+    await state.set_state(BudgetStates.waiting_planned_income)
+
+
+async def delete_budget_callback(callback: types.CallbackQuery):
+    """Удаление бюджета"""
+    budget_id = int(callback.data.split("_")[2])
+    
+    keyboard = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_{budget_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
+    ]
+    
+    await callback.message.edit_text(
+        "⚠️ Вы уверены, что хотите удалить этот бюджет?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+
+async def confirm_delete_budget(callback: types.CallbackQuery):
+    """Подтверждение удаления бюджета"""
+    if callback.data == "cancel":
+        await callback.message.delete()
+        return
+    
+    budget_id = int(callback.data.split("_")[2])
+    
+    if db.delete_budget(budget_id):
+        await callback.message.edit_text("✅ Бюджет успешно удален!")
+        await asyncio.sleep(2)
+        await callback.message.delete()
+    else:
+        await callback.answer("❌ Ошибка при удалении", show_alert=True)
+
+
+# Обёртки для кнопок меню бюджета
+async def start_create_budget(message: types.Message, state: FSMContext):
+    """Обёртка для создания бюджета через кнопку меню"""
+    return await handle_create_budget(message, state)
+
+
+async def start_show_budgets(message: types.Message):
+    """Обёртка для показа бюджетов через кнопку меню"""
+    return await show_user_budgets(message)
+
+
+async def start_budget_forecast(message: types.Message):
+    """Обёртка для прогноза бюджета через кнопку меню"""
+    return await show_budget_forecast(message)
+
 from utils import NumberFormatter  # импорт добавлен
 
 # удалить последний доход
