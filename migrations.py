@@ -153,6 +153,41 @@ class Migration005_AddRecurringTransactions(Migration):
         print(f"⚠️  Migration {self.version}: Rollback not supported (SQLite limitation)")
 
 
+class Migration006_AddBudgetPlanning(Migration):
+    """Добавляет таблицу планирования бюджета"""
+    
+    def __init__(self):
+        super().__init__(6, "Add budget planning table")
+    
+    def up(self, conn: sqlite3.Connection):
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS budget_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                year INTEGER NOT NULL,
+                planned_income REAL DEFAULT 0,
+                planned_expenses REAL DEFAULT 0,
+                credit_expenses REAL DEFAULT 0,
+                custom_expenses TEXT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+                UNIQUE(user_id, month, year)
+            )
+        """)
+        conn.commit()
+        print(f"✅ Migration {self.version}: {self.description} - applied")
+    
+    def down(self, conn: sqlite3.Connection):
+        cursor = conn.cursor()
+        cursor.execute("DROP TABLE IF EXISTS budget_plans")
+        conn.commit()
+        print(f"✅ Migration {self.version}: Rolled back")
+
+
 class MigrationManager:
     """Менеджер миграций"""
     
@@ -164,6 +199,7 @@ class MigrationManager:
             Migration003_AddCategoryIcons(),
             Migration004_AddPaymentReminders(),
             Migration005_AddRecurringTransactions(),
+            Migration006_AddBudgetPlanning(),
         ]
         self._ensure_migrations_table()
     
