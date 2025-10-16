@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  dohot-bot:
+    build: .
+    container_name: dohot-bot
+    restart: unless-stopped
+    
+    env_file:
+      - .env
+    
+    volumes:
+      # Сохраняем базу данных на хосте
+      - ./data:/app/data
+      # Сохраняем графики на хосте
+      - ./charts:/app/charts
+    
+    environment:
+      - DB_PATH=/app/data/dohot.db
+      - CHARTS_DIR=/app/charts
+    
+    # Логи
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
