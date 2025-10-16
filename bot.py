@@ -699,37 +699,3 @@ def register_handlers(dp: Dispatcher):
         cmd_start,
         F.text == "🏠 Главное меню"
     )
-
-
-# ==================== ЗАПУСК БОТА ====================
-
-async def main():
-    """Основная функция запуска бота"""
-    # Получаем токен из переменной окружения или конфига
-    BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # ЗАМЕНИТЕ НА ВАШ ТОКЕН
-    
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
-    
-    # Регистрируем обработчики
-    register_handlers(dp)
-    
-    # Настраиваем планировщик для напоминаний
-    scheduler.add_job(
-        check_payment_reminders,
-        CronTrigger(hour=9, minute=0),  # Проверяем каждый день в 9:00
-        args=[bot]
-    )
-    scheduler.start()
-    
-    logger.info("Бот запущен!")
-    
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
-        scheduler.shutdown()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
