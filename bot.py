@@ -100,6 +100,14 @@ class BudgetStates(StatesGroup):
     waiting_notes = State()
     viewing_budget = State()
     selecting_budget_to_edit = State()
+    
+    # Новые состояния для работы с категориями
+    selecting_income_categories = State()
+    waiting_income_category_amount = State()
+    selecting_expense_categories = State()
+    waiting_expense_category_amount = State()
+    editing_single_category = State()
+    waiting_edited_category_amount = State()
 
 
 # ==================== КЛАВИАТУРЫ ====================
