@@ -1,6 +1,12 @@
 from aiogram import types, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
+from aiogram.types import (
+    InlineKeyboardMarkup, 
+    InlineKeyboardButton, 
+    ReplyKeyboardRemove,
+    ReplyKeyboardMarkup,
+    KeyboardButton
+)
 from datetime import datetime
 
 from database import Database
