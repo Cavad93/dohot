@@ -1,4 +1,4 @@
-from aiogram import types, F, Router          # ← добавь Router тут
+from aiogram import types, F, Router
 from aiogram.filters import StateFilter 
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
@@ -9,24 +9,24 @@ from aiogram.types import (
     KeyboardButton
 )
 from datetime import datetime
-
-from aiogram import Router              # ← добавь
-router = Router()                       # ← добавь
-
 import calendar
+import sqlite3
+import asyncio
+
+from aiogram import Router
+router = Router()
 
 from database import Database
 from calculations import FinancialCalculator
 from bot import (
     DebtStates, CategoryStates, IncomeStates, ExpenseStates, 
-    InvestmentStates, SavingsStates, CreditStates,
+    InvestmentStates, SavingsStates, CreditStates, BudgetStates,
     get_main_menu_keyboard, get_debt_menu_keyboard,
     get_income_expense_keyboard, get_investment_menu_keyboard,
-    get_cancel_keyboard, get_credit_menu_keyboard
+    get_cancel_keyboard, get_credit_menu_keyboard, get_budget_menu_keyboard
 )
 
 db = Database()
-
 # ==================== ОБРАБОТЧИКИ ДОЛГОВ ====================
 
 async def handle_add_debt(message: types.Message, state: FSMContext):
