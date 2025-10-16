@@ -19,7 +19,7 @@ from bot import (
     process_interest_rate, process_remaining_debt, process_start_date,
     process_credit_payment_callback, confirm_credit_payment,
     CreditStates, DebtStates, CategoryStates, IncomeStates,
-    ExpenseStates, InvestmentStates, SavingsStates,
+    ExpenseStates, InvestmentStates, SavingsStates, BudgetStates,
     check_payment_reminders
 )
 from handlers import (
@@ -41,6 +41,10 @@ from handlers import (
     process_early_payment_amount, process_early_payment_type,
     handle_credit_capabilities, process_capabilities_credit_selection,
     process_capability_toggle, show_user_expenses,
+    start_create_budget, start_show_budgets, start_budget_forecast,
+    process_budget_month_selection, process_planned_income, process_planned_expenses,
+    view_budget_details, edit_budget_callback, delete_budget_callback,
+    confirm_delete_budget,
     cancel_handler
 )
 
@@ -60,15 +64,33 @@ def register_all_handlers(dp: Dispatcher):
     dp.message.register(cmd_help, Command("help"))
     
     # ==================== ГЛАВНОЕ МЕНЮ ====================
+    # ==================== ГЛАВНОЕ МЕНЮ ====================
     dp.message.register(
         handle_main_menu,
         F.text.in_([
             "💳 Кредиты", "💸 Долги", "💰 Доходы", "🛒 Расходы",
-            "📊 Инвестиции", "🏦 Сбережения", "📈 График капитала",
-            "📋 Отчёт", "⚙️ Категории"
+            "📊 Инвестиции", "🏦 Сбережения", "📅 Бюджет",
+            "📈 График капитала", "📋 Отчёт", "⚙️ Категории"
         ])
     )
     
+    # ==================== БЮДЖЕТ ====================
+    # Меню бюджета
+    dp.message.register(start_create_budget, F.text == "➕ Создать бюджет")
+    dp.message.register(start_show_budgets, F.text == "📋 Мои бюджеты")
+    dp.message.register(start_budget_forecast, F.text == "📊 Прогноз на 6 месяцев")
+    
+    # FSM для создания/редактирования бюджета
+    dp.callback_query.register(process_budget_month_selection, BudgetStates.selecting_month)
+    dp.message.register(process_planned_income, BudgetStates.waiting_planned_income)
+    dp.message.register(process_planned_expenses, BudgetStates.waiting_planned_expenses)
+    
+    # Просмотр и редактирование бюджетов
+    dp.callback_query.register(view_budget_details, F.data.startswith("view_budget_"))
+    dp.callback_query.register(edit_budget_callback, F.data.startswith("edit_budget_"))
+    dp.callback_query.register(delete_budget_callback, F.data.startswith("delete_budget_"))
+    dp.callback_query.register(confirm_delete_budget, F.data.startswith("confirm_delete_"))
+
     # Возврат в главное меню
     dp.message.register(cmd_start, F.text == "🏠 Главное меню")
     
