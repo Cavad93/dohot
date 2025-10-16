@@ -67,12 +67,14 @@ class IncomeStates(StatesGroup):
     waiting_amount = State()
     selecting_category = State()
     waiting_description = State()
-
+    waiting_delete_id = State()
 
 class ExpenseStates(StatesGroup):
     waiting_amount = State()
     selecting_category = State()
     waiting_description = State()
+    waiting_delete_id = State()
+
 
 
 class InvestmentStates(StatesGroup):
@@ -88,6 +90,18 @@ class SavingsStates(StatesGroup):
     waiting_amount = State()
 
 
+class BudgetStates(StatesGroup):
+    selecting_month = State()
+    waiting_planned_income = State()
+    waiting_planned_expenses = State()
+    editing_credit_expenses = State()
+    waiting_custom_expense_name = State()
+    waiting_custom_expense_amount = State()
+    waiting_notes = State()
+    viewing_budget = State()
+    selecting_budget_to_edit = State()
+
+
 # ==================== КЛАВИАТУРЫ ====================
 
 def get_main_menu_keyboard():
@@ -95,8 +109,8 @@ def get_main_menu_keyboard():
         [KeyboardButton(text="💳 Кредиты"), KeyboardButton(text="💸 Долги")],
         [KeyboardButton(text="💰 Доходы"), KeyboardButton(text="🛒 Расходы")],
         [KeyboardButton(text="📊 Инвестиции"), KeyboardButton(text="🏦 Сбережения")],
-        [KeyboardButton(text="📈 График капитала"), KeyboardButton(text="📋 Отчёт")],
-        [KeyboardButton(text="⚙️ Категории")]
+        [KeyboardButton(text="📅 Бюджет"), KeyboardButton(text="📋 Отчёт")],
+        [KeyboardButton(text="📈 График капитала"), KeyboardButton(text="⚙️ Категории")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
@@ -126,12 +140,16 @@ def get_debt_menu_keyboard():
 
 def get_income_expense_keyboard(income: bool = True):
     text = "доход" if income else "расход"
+    plural = "доходы" if income else "расходы"
     keyboard = [
         [KeyboardButton(text=f"➕ Добавить {text}")],
-        [KeyboardButton(text=f"📋 Мои {text}ы" if income else f"📋 Мои {text}ы")],
+        [KeyboardButton(text=f"📋 Мои {plural}")],
+        [KeyboardButton(text=f"🗑 Удалить последний {text}")],
+        [KeyboardButton(text=f"🗑 Удалить {text} по ID")],
         [KeyboardButton(text="🏠 Главное меню")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 
 
 def get_investment_menu_keyboard():
@@ -148,7 +166,14 @@ def get_cancel_keyboard():
     keyboard = [[KeyboardButton(text="❌ Отмена")]]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-
+def get_budget_menu_keyboard():
+    keyboard = [
+        [KeyboardButton(text="➕ Создать бюджет")],
+        [KeyboardButton(text="📋 Мои бюджеты")],
+        [KeyboardButton(text="📊 Прогноз на 6 месяцев")],
+        [KeyboardButton(text="🏠 Главное меню")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
 
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -265,8 +290,26 @@ async def handle_main_menu(message: types.Message, state: FSMContext):
     elif message.text == "📋 Отчёт":
         await show_financial_report(message)
     
+    elif message.text == "📅 Бюджет":
+        await message.answer(
+            "📅 Планирование бюджета\n\n"
+            "Здесь вы можете:\n"
+            "• Создать бюджет на месяц\n"
+            "• Посмотреть существующие бюджеты\n"
+            "• Увидеть прогноз с учетом кредитов",
+            reply_markup=get_budget_menu_keyboard()
+        )
+    
     elif message.text == "⚙️ Категории":
         await show_categories_menu(message)
+    elif message.text == "🗑 Удалить последний доход":
+        await handlers.handle_delete_last_income(message)
+    elif message.text == "🗑 Удалить доход по ID":
+        await handlers.handle_delete_income_by_id(message, state)
+    elif message.text == "🗑 Удалить последний расход":
+        await handlers.handle_delete_last_expense(message)
+    elif message.text == "🗑 Удалить расход по ID":
+        await handlers.handle_delete_expense_by_id(message, state)
 
 
 # ==================== ОБРАБОТЧИКИ КРЕДИТОВ ====================
