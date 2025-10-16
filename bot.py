@@ -34,18 +34,31 @@ class CreditStates(StatesGroup):
     waiting_remaining_debt = State()
     waiting_start_date = State()
     
-    # Для обновления возможностей кредита
-    selecting_credit_for_capabilities = State()
-    updating_capabilities = State()
+    selecting_credit = State()
+    entering_payment_amount = State()
     
-    # Для внесения платежа
-    selecting_credit_for_payment = State()
-    confirming_payment = State()
-    
-    # Для досрочного погашения
     selecting_credit_for_early = State()
     entering_early_amount = State()
     selecting_early_type = State()
+    
+    selecting_credit_for_capabilities = State()
+    selecting_capability = State()
+
+
+class CreditCardStates(StatesGroup):
+    waiting_card_name = State()
+    waiting_bank_name = State()
+    waiting_credit_limit = State()
+    waiting_interest_rate = State()
+    waiting_minimum_payment_percent = State()
+    
+    selecting_card_for_transaction = State()
+    waiting_transaction_amount = State()
+    waiting_transaction_notes = State()
+    
+    selecting_card_for_spending = State()
+    waiting_spending_amount = State()
+    waiting_spending_notes = State()
 
 
 class DebtStates(StatesGroup):
@@ -126,12 +139,22 @@ def get_main_menu_keyboard():
 def get_credit_menu_keyboard():
     keyboard = [
         [KeyboardButton(text="➕ Добавить кредит")],
-        [KeyboardButton(text="📋 Мои кредиты")],
-        [KeyboardButton(text="✅ Внести платёж")],
-        [KeyboardButton(text="⚡ Досрочное погашение")],
-        [KeyboardButton(text="🎯 Рекомендации")],
-        [KeyboardButton(text="⚙️ Настроить возможности кредита")],
+        [KeyboardButton(text="📋 Мои кредиты"), KeyboardButton(text="💳 Внести платёж")],
+        [KeyboardButton(text="💡 Рекомендации"), KeyboardButton(text="⚙️ Возможности кредитов")],
+        [KeyboardButton(text="💰 Досрочное погашение")],
+        [KeyboardButton(text="💳 Кредитные карты")],
         [KeyboardButton(text="🏠 Главное меню")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+def get_credit_card_menu_keyboard():
+    keyboard = [
+        [KeyboardButton(text="➕ Добавить карту")],
+        [KeyboardButton(text="📋 Мои карты")],
+        [KeyboardButton(text="💰 Пополнить карту"), KeyboardButton(text="🛒 Потратить")],
+        [KeyboardButton(text="📊 История операций")],
+        [KeyboardButton(text="◀️ К кредитам"), KeyboardButton(text="🏠 Главное меню")]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
