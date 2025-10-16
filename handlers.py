@@ -1442,18 +1442,18 @@ async def finalize_budget_creation(message: types.Message, state: FSMContext, us
     income_cats = data.get('income_categories_dict', {})
     expense_cats = data.get('expense_categories_dict', {})
     
-    # Конвертируем ключи в int для корректного сохранения
     income_cats_int = {int(k): v for k, v in income_cats.items()}
     expense_cats_int = {int(k): v for k, v in expense_cats.items()}
     
-    # Создаем бюджет
+    credit_expenses_total = db.get_credit_expenses_for_budget(user_id)
+    
     budget_id = db.create_or_update_budget(
         user_id=user_id,
         month=data['month'],
         year=data['year'],
         income_categories=income_cats_int,
         expense_categories=expense_cats_int,
-        credit_expenses=data.get('credit_expenses', 0)
+        credit_expenses=credit_expenses_total
     )
     
     # Формируем отчет
