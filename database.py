@@ -8,6 +8,25 @@ class Database:
     def __init__(self, db_path: str = "dohot.db"):
         self.db_path = db_path
         self.init_database()
+        
+    def get_credit_expenses_for_budget(self, user_id: int) -> float:
+        """
+        Получить сумму кредитных расходов для бюджета
+        Включает обычные кредиты + минимальные платежи по кредитным картам
+        """
+        from credit_cards import CreditCardManager
+        
+        total_credit_expenses = 0
+        
+        credits = self.get_user_credits(user_id, active_only=True)
+        for credit in credits:
+            total_credit_expenses += credit['monthly_payment']
+        
+        card_manager = CreditCardManager(self.db_path)
+        total_card_payment = card_manager.get_total_minimum_payment(user_id)
+        total_credit_expenses += total_card_payment
+        
+        return total_credit_expenses
     
     def get_connection(self):
         return sqlite3.connect(self.db_path, check_same_thread=False)
