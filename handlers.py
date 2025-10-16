@@ -443,27 +443,85 @@ async def process_expense_category(callback: types.CallbackQuery, state: FSMCont
 
 async def process_expense_description(message: types.Message, state: FSMContext):
     """Обработка описания расхода и завершение добавления"""
+    from datetime import date
+    
     data = await state.get_data()
     
     description = None if message.text == "0" else message.text
+    expense_date = date.today().isoformat()
     
     # Добавляем расход в базу
     db.add_expense(
         user_id=message.from_user.id,
         amount=data['amount'],
         category_id=data.get('category_id'),
-        description=description
+        description=description,
+        expense_date=expense_date
+    )
+    
+    # Проверяем соответствие бюджету
+    budget_warning = await check_expense_budget_warning(
+        message.from_user.id,
+        data.get('category_id'),
+        data['amount'],
+        expense_date
     )
     
     await state.clear()
     
+    response_text = f"✅ Расход успешно добавлен!\n\n"
+    response_text += f"💸 Сумма: {data['amount']:,.2f} руб.\n"
+    response_text += f"📝 Описание: {description or 'не указано'}"
+    response_text += budget_warning
+    
     await message.answer(
-        f"✅ Расход успешно добавлен!\n\n"
-        f"💰 Сумма: {data['amount']:,.2f} руб.\n"
-        f"📝 Описание: {description or 'не указано'}",
+        response_text,
         reply_markup=get_income_expense_keyboard(income=False)
     )
 
+
+async def check_expense_budget_warning(user_id: int, category_id: int, 
+                                       amount: float, expense_date: str) -> str:
+    """Проверяет расход против бюджета и формирует предупреждение"""
+    
+    check_result = db.check_expense_against_budget(user_id, category_id, amount, expense_date)
+    
+    if not check_result['has_budget']:
+        return ""
+    
+    # Получаем название категории
+    all_cats = db.get_user_categories(user_id)
+    cat_name = next((c['name'] for c in all_cats if c['id'] == category_id), "Неизвестная категория")
+    
+    warning = f"\n\n📊 СТАТУС БЮДЖЕТА\n"
+    warning += f"Категория: {cat_name}\n\n"
+    
+    if not check_result['category_in_budget']:
+        warning += f"⚠️ ВНИМАНИЕ! Эта категория не была запланирована в бюджете на этот месяц!\n\n"
+        warning += "Рекомендуется добавить эту категорию в бюджет для лучшего контроля расходов."
+        return warning
+    
+    # Категория есть в бюджете
+    planned = check_result['planned']
+    spent_after = check_result['spent_after']
+    percent = check_result['percent_used']
+    
+    warning += f"Запланировано: {planned:,.2f} руб.\n"
+    warning += f"Потрачено: {spent_after:,.2f} руб.\n"
+    warning += f"Использовано: {percent:.1f}%\n\n"
+    
+    if check_result['over_budget']:
+        warning += f"🚨 ПРЕВЫШЕН БЮДЖЕТ на {spent_after - planned:,.2f} руб.!"
+    elif percent >= 90:
+        warning += f"⚠️ ВНИМАНИЕ! Осталось только {100 - percent:.1f}% бюджета по этой категории!"
+    elif percent >= 75:
+        warning += f"⚡ Израсходовано {percent:.1f}% бюджета. Будьте внимательны!"
+    elif percent >= 50:
+        warning += f"✅ Израсходовано {percent:.1f}% бюджета."
+    else:
+        warning += f"✅ Бюджет под контролем. Использовано {percent:.1f}%."
+    
+    return warning
 
 # ==================== ОБРАБОТЧИКИ ИНВЕСТИЦИЙ ====================
 
@@ -1102,48 +1160,339 @@ async def process_planned_income(message: types.Message, state: FSMContext):
         await message.answer("❌ Неверный формат! Введите число, например: 75000")
 
 
-async def process_planned_expenses(message: types.Message, state: FSMContext):
-    """Обработка планируемых расходов"""
+async def process_planned_income(message: types.Message, state: FSMContext):
+    """Обработка выбора категорий доходов"""
     if message.text == "❌ Отмена":
         await cancel_handler(message, state)
         return
     
-    try:
-        planned_expenses = float(message.text.replace(",", "."))
-        data = await state.get_data()
-        
-        # Создаем или обновляем бюджет
-        budget_id = db.create_or_update_budget(
-            user_id=message.from_user.id,
-            month=data['month'],
-            year=data['year'],
-            planned_income=data['planned_income'],
-            planned_expenses=planned_expenses,
-            credit_expenses=data['credit_expenses']
+    data = await state.get_data()
+    
+    # Получаем категории доходов пользователя
+    income_categories = db.get_user_categories(message.from_user.id, cat_type="income")
+    
+    if not income_categories:
+        await message.answer(
+            "У вас нет категорий доходов. Сначала создайте их в разделе '⚙️ Категории'",
+            reply_markup=get_budget_menu_keyboard()
         )
-        
-        # Показываем результат
-        total_expenses = planned_expenses + data['credit_expenses']
-        balance = data['planned_income'] - total_expenses
-        balance_emoji = "✅" if balance >= 0 else "❌"
-        
-        result_text = f"""
-✅ Бюджет на {calendar.month_name[data['month']]} {data['year']} создан!
-
-💰 Планируемый доход: {data['planned_income']:,.2f} руб.
-
-📊 Расходы:
-  • Планируемые: {planned_expenses:,.2f} руб.
-  • Кредиты: {data['credit_expenses']:,.2f} руб.
-  • ИТОГО: {total_expenses:,.2f} руб.
-
-{balance_emoji} Баланс: {balance:,.2f} руб.
-"""
-        
         await state.clear()
-        await message.answer(result_text, reply_markup=get_budget_menu_keyboard())
+        return
+    
+    # Получаем предложения на основе истории
+    suggestions = db.suggest_budget_categories(message.from_user.id, lookback_months=3)
+    
+    await state.update_data(income_categories_dict={}, income_suggestions=suggestions['income'])
+    
+    # Показываем список категорий для добавления
+    await show_income_category_selection(message, state, income_categories, suggestions['income'])
+
+
+async def show_income_category_selection(message: types.Message, state: FSMContext, 
+                                        categories: list, suggestions: dict):
+    """Показывает категории доходов для планирования"""
+    data = await state.get_data()
+    added_cats = data.get('income_categories_dict', {})
+    
+    keyboard = []
+    
+    text = "💰 Планирование доходов\n\n"
+    text += "Выберите категорию дохода для добавления в бюджет:\n\n"
+    
+    for cat in categories:
+        cat_id = cat['id']
+        cat_name = cat['name']
+        
+        # Показываем уже добавленные категории
+        if str(cat_id) in added_cats:
+            amount = added_cats[str(cat_id)]
+            text += f"✅ {cat_name}: {amount:,.2f} руб.\n"
+        else:
+            # Показываем предложение если есть
+            if cat_id in suggestions:
+                suggested = suggestions[cat_id]
+                button_text = f"➕ {cat_name} (предл.: {suggested:,.0f} руб.)"
+            else:
+                button_text = f"➕ {cat_name}"
+            
+            keyboard.append([InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"budget_add_income_{cat_id}"
+            )])
+    
+    if added_cats:
+        total = sum(added_cats.values())
+        text += f"\n💵 Итого доходов: {total:,.2f} руб.\n\n"
+    
+    keyboard.append([InlineKeyboardButton(
+        text="✅ Далее к расходам" if added_cats else "⏭ Пропустить доходы",
+        callback_data="budget_income_done"
+    )])
+    keyboard.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+    
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(BudgetStates.selecting_income_categories)
+
+
+async def process_income_category_selection(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора категории дохода"""
+    if callback.data == "cancel":
+        await callback.message.delete()
+        await state.clear()
+        await callback.message.answer("❌ Отменено", reply_markup=get_budget_menu_keyboard())
+        return
+    
+    if callback.data == "budget_income_done":
+        # Переходим к расходам
+        await callback.message.delete()
+        
+        expense_categories = db.get_user_categories(callback.from_user.id, cat_type="expense")
+        
+        if not expense_categories:
+            await callback.message.answer(
+                "У вас нет категорий расходов. Сначала создайте их в разделе '⚙️ Категории'",
+                reply_markup=get_budget_menu_keyboard()
+            )
+            await state.clear()
+            return
+        
+        data = await state.get_data()
+        suggestions = db.suggest_budget_categories(callback.from_user.id, lookback_months=3)
+        await state.update_data(expense_categories_dict={}, expense_suggestions=suggestions['expense'])
+        
+        await show_expense_category_selection(callback.message, state, expense_categories, suggestions['expense'])
+        return
+    
+    # Обработка добавления категории
+    category_id = int(callback.data.split("_")[-1])
+    
+    await state.update_data(selected_income_category=category_id)
+    
+    # Проверяем есть ли предложение
+    data = await state.get_data()
+    suggestions = data.get('income_suggestions', {})
+    
+    prompt_text = "Введите планируемую сумму дохода (в рублях):"
+    
+    if category_id in suggestions:
+        suggested = suggestions[category_id]
+        prompt_text = f"Введите планируемую сумму дохода (в рублях):\n\n💡 Предложение на основе истории: {suggested:,.2f} руб."
+    
+    await callback.message.edit_text(
+        prompt_text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
+        ])
+    )
+    await state.set_state(BudgetStates.waiting_income_category_amount)
+
+
+async def process_income_category_amount(message: types.Message, state: FSMContext):
+    """Обработка суммы для категории дохода"""
+    try:
+        amount = float(message.text.replace(",", "."))
+        
+        data = await state.get_data()
+        category_id = data['selected_income_category']
+        
+        # Добавляем в словарь категорий
+        income_cats = data.get('income_categories_dict', {})
+        income_cats[str(category_id)] = amount
+        
+        await state.update_data(income_categories_dict=income_cats)
+        
+        # Показываем снова список категорий
+        income_categories = db.get_user_categories(message.from_user.id, cat_type="income")
+        suggestions = data.get('income_suggestions', {})
+        
+        await show_income_category_selection(message, state, income_categories, suggestions)
+        
     except ValueError:
-        await message.answer("❌ Неверный формат! Введите число, например: 45000")
+        await message.answer("❌ Неверный формат! Введите число, например: 75000")
+
+
+async def show_expense_category_selection(message: types.Message, state: FSMContext,
+                                         categories: list, suggestions: dict):
+    """Показывает категории расходов для планирования"""
+    data = await state.get_data()
+    added_cats = data.get('expense_categories_dict', {})
+    
+    keyboard = []
+    
+    text = "🛒 Планирование расходов\n\n"
+    text += "Выберите категорию расхода для добавления в бюджет:\n\n"
+    
+    for cat in categories:
+        cat_id = cat['id']
+        cat_name = cat['name']
+        
+        # Показываем уже добавленные категории
+        if str(cat_id) in added_cats:
+            amount = added_cats[str(cat_id)]
+            text += f"✅ {cat_name}: {amount:,.2f} руб.\n"
+        else:
+            # Показываем предложение если есть
+            if cat_id in suggestions:
+                suggested = suggestions[cat_id]
+                button_text = f"➕ {cat_name} (предл.: {suggested:,.0f} руб.)"
+            else:
+                button_text = f"➕ {cat_name}"
+            
+            keyboard.append([InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"budget_add_expense_{cat_id}"
+            )])
+    
+    if added_cats:
+        total = sum(added_cats.values())
+        text += f"\n💳 Итого расходов: {total:,.2f} руб.\n\n"
+    
+    data_income = data.get('income_categories_dict', {})
+    if data_income:
+        total_income = sum(data_income.values())
+        total_expense = sum(added_cats.values()) if added_cats else 0
+        credit_exp = data.get('credit_expenses', 0)
+        balance = total_income - total_expense - credit_exp
+        balance_emoji = "✅" if balance >= 0 else "⚠️"
+        
+        text += f"{balance_emoji} Остаток: {balance:,.2f} руб.\n\n"
+    
+    keyboard.append([InlineKeyboardButton(
+        text="✅ Завершить создание бюджета" if added_cats else "⏭ Пропустить расходы",
+        callback_data="budget_expense_done"
+    )])
+    keyboard.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+    
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(BudgetStates.selecting_expense_categories)
+
+
+async def process_expense_category_selection(callback: types.CallbackQuery, state: FSMContext):
+    """Обработка выбора категории расхода"""
+    if callback.data == "cancel":
+        await callback.message.delete()
+        await state.clear()
+        await callback.message.answer("❌ Отменено", reply_markup=get_budget_menu_keyboard())
+        return
+    
+    if callback.data == "budget_expense_done":
+        # Завершаем создание бюджета
+        await callback.message.delete()
+        await finalize_budget_creation(callback.message, state, callback.from_user.id)
+        return
+    
+    # Обработка добавления категории
+    category_id = int(callback.data.split("_")[-1])
+    
+    await state.update_data(selected_expense_category=category_id)
+    
+    # Проверяем есть ли предложение
+    data = await state.get_data()
+    suggestions = data.get('expense_suggestions', {})
+    
+    prompt_text = "Введите планируемую сумму расхода (в рублях):"
+    
+    if category_id in suggestions:
+        suggested = suggestions[category_id]
+        prompt_text = f"Введите планируемую сумму расхода (в рублях):\n\n💡 Предложение на основе истории: {suggested:,.2f} руб."
+    
+    await callback.message.edit_text(
+        prompt_text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
+        ])
+    )
+    await state.set_state(BudgetStates.waiting_expense_category_amount)
+
+
+async def process_expense_category_amount(message: types.Message, state: FSMContext):
+    """Обработка суммы для категории расхода"""
+    try:
+        amount = float(message.text.replace(",", "."))
+        
+        data = await state.get_data()
+        category_id = data['selected_expense_category']
+        
+        # Добавляем в словарь категорий
+        expense_cats = data.get('expense_categories_dict', {})
+        expense_cats[str(category_id)] = amount
+        
+        await state.update_data(expense_categories_dict=expense_cats)
+        
+        # Показываем снова список категорий
+        expense_categories = db.get_user_categories(message.from_user.id, cat_type="expense")
+        suggestions = data.get('expense_suggestions', {})
+        
+        await show_expense_category_selection(message, state, expense_categories, suggestions)
+        
+    except ValueError:
+        await message.answer("❌ Неверный формат! Введите число, например: 15000")
+
+
+async def finalize_budget_creation(message: types.Message, state: FSMContext, user_id: int):
+    """Завершение создания бюджета"""
+    data = await state.get_data()
+    
+    income_cats = data.get('income_categories_dict', {})
+    expense_cats = data.get('expense_categories_dict', {})
+    
+    # Конвертируем ключи в int для корректного сохранения
+    income_cats_int = {int(k): v for k, v in income_cats.items()}
+    expense_cats_int = {int(k): v for k, v in expense_cats.items()}
+    
+    # Создаем бюджет
+    budget_id = db.create_or_update_budget(
+        user_id=user_id,
+        month=data['month'],
+        year=data['year'],
+        income_categories=income_cats_int,
+        expense_categories=expense_cats_int,
+        credit_expenses=data.get('credit_expenses', 0)
+    )
+    
+    # Формируем отчет
+    total_income = sum(income_cats.values())
+    total_expenses = sum(expense_cats.values())
+    credit_exp = data.get('credit_expenses', 0)
+    total_all_expenses = total_expenses + credit_exp
+    balance = total_income - total_all_expenses
+    balance_emoji = "✅" if balance >= 0 else "❌"
+    
+    # Получаем названия категорий
+    all_cats = db.get_user_categories(user_id)
+    cat_names = {c['id']: c['name'] for c in all_cats}
+    
+    result_text = f"✅ Бюджет на {calendar.month_name[data['month']]} {data['year']} создан!\n\n"
+    
+    if income_cats:
+        result_text += "💰 Доходы:\n"
+        for cat_id, amount in income_cats.items():
+            cat_name = cat_names.get(int(cat_id), "Неизвестно")
+            result_text += f"  • {cat_name}: {amount:,.2f} руб.\n"
+        result_text += f"  📊 ИТОГО доходов: {total_income:,.2f} руб.\n\n"
+    
+    if expense_cats or credit_exp > 0:
+        result_text += "🛒 Расходы:\n"
+        for cat_id, amount in expense_cats.items():
+            cat_name = cat_names.get(int(cat_id), "Неизвестно")
+            result_text += f"  • {cat_name}: {amount:,.2f} руб.\n"
+        if credit_exp > 0:
+            result_text += f"  • Кредиты: {credit_exp:,.2f} руб.\n"
+        result_text += f"  📊 ИТОГО расходов: {total_all_expenses:,.2f} руб.\n\n"
+    
+    result_text += f"{balance_emoji} Баланс: {balance:,.2f} руб."
+    
+    if balance < 0:
+        result_text += "\n\n⚠️ Внимание! Расходы превышают доходы. Рекомендуется пересмотреть бюджет."
+    
+    await state.clear()
+    await message.answer(result_text, reply_markup=get_budget_menu_keyboard())
 
 
 async def show_user_budgets(message: types.Message):
@@ -1166,17 +1515,17 @@ async def show_user_budgets(message: types.Message):
         balance_emoji = "✅" if balance >= 0 else "❌"
         
         text += f"{i}. {calendar.month_name[budget['month']]} {budget['year']}\n"
-        text += f"   💰 Доход: {budget['planned_income']:,.2f} руб.\n"
-        text += f"   📊 Расходы: {total_expenses:,.2f} руб.\n"
-        text += f"   {balance_emoji} Баланс: {balance:,.2f} руб.\n\n"
+        text += f"   💰 Доход: {budget['planned_income']:,.0f} руб.\n"
+        text += f"   🛒 Расход: {total_expenses:,.0f} руб.\n"
+        text += f"   {balance_emoji} Баланс: {balance:,.0f} руб.\n\n"
     
     keyboard = []
-    for budget in budgets[:10]:  # Показываем первые 10
+    for budget in budgets[:10]:
+        month_name = calendar.month_name[budget['month']]
         keyboard.append([InlineKeyboardButton(
-            text=f"{calendar.month_name[budget['month']]} {budget['year']}",
+            text=f"📊 {month_name} {budget['year']}",
             callback_data=f"view_budget_{budget['id']}"
         )])
-    keyboard.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="cancel")])
     
     await message.answer(
         text,
@@ -1216,18 +1565,14 @@ async def show_budget_forecast(message: types.Message):
     await message.answer(text, reply_markup=get_budget_menu_keyboard())
 
 
-async def view_budget_details(callback: types.CallbackQuery, state: FSMContext):
-    """Показ деталей конкретного бюджета"""
-    if callback.data == "cancel":
-        await callback.message.delete()
-        await state.clear()
-        return
-    
+async def view_budget_details(callback: types.CallbackQuery):
+    """Подробный просмотр бюджета с детализацией по категориям"""
     budget_id = int(callback.data.split("_")[2])
     
-    conn = db.get_connection()
+    conn = sqlite3.connect('financial_bot.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    
     cursor.execute("SELECT * FROM budget_plans WHERE id = ?", (budget_id,))
     budget = cursor.fetchone()
     conn.close()
@@ -1237,37 +1582,51 @@ async def view_budget_details(callback: types.CallbackQuery, state: FSMContext):
         return
     
     budget = dict(budget)
+    user_id = budget['user_id']
     
-    # Получаем актуальные расходы по кредитам
-    credits = db.get_user_credits(callback.from_user.id)
-    credit_expenses = FinancialCalculator.calculate_monthly_credit_expenses(
-        credits, budget['month'], budget['year']
-    )
+    # Получаем категории с именами
+    import json
+    income_cats = json.loads(budget['income_categories']) if budget.get('income_categories') else {}
+    expense_cats = json.loads(budget['expense_categories']) if budget.get('expense_categories') else {}
     
-    total_expenses = budget['planned_expenses'] + credit_expenses['total']
+    all_cats = db.get_user_categories(user_id)
+    cat_names = {c['id']: c['name'] for c in all_cats}
+    
+    total_expenses = budget['planned_expenses'] + budget['credit_expenses']
     balance = budget['planned_income'] - total_expenses
     balance_emoji = "✅" if balance >= 0 else "❌"
     
-    text = f"📅 Бюджет на {calendar.month_name[budget['month']]} {budget['year']}\n\n"
-    text += f"💰 Планируемый доход: {budget['planned_income']:,.2f} руб.\n\n"
-    text += f"📊 Расходы:\n"
-    text += f"  • Планируемые: {budget['planned_expenses']:,.2f} руб.\n"
-    text += f"  • Кредиты: {credit_expenses['total']:,.2f} руб.\n"
+    text = f"📊 Бюджет на {calendar.month_name[budget['month']]} {budget['year']}\n\n"
     
-    if credit_expenses['credits']:
-        for credit in credit_expenses['credits']:
-            text += f"    ├─ {credit['display_name']}: {credit['monthly_payment']:,.2f} руб.\n"
+    # Детализация доходов
+    if income_cats:
+        text += "💰 Доходы:\n"
+        for cat_id_str, amount in income_cats.items():
+            cat_name = cat_names.get(int(cat_id_str), "Неизвестно")
+            text += f"  • {cat_name}: {amount:,.2f} руб.\n"
+        text += f"  📊 ИТОГО: {budget['planned_income']:,.2f} руб.\n\n"
+    else:
+        text += f"💰 Доходы: {budget['planned_income']:,.2f} руб.\n\n"
     
-    text += f"\n  ИТОГО расходов: {total_expenses:,.2f} руб.\n\n"
-    text += f"{balance_emoji} Баланс: {balance:,.2f} руб.\n"
+    # Детализация расходов
+    text += "🛒 Расходы:\n"
+    if expense_cats:
+        for cat_id_str, amount in expense_cats.items():
+            cat_name = cat_names.get(int(cat_id_str), "Неизвестно")
+            text += f"  • {cat_name}: {amount:,.2f} руб.\n"
+    if budget['credit_expenses'] > 0:
+        text += f"  • Кредиты: {budget['credit_expenses']:,.2f} руб.\n"
+    text += f"  📊 ИТОГО: {total_expenses:,.2f} руб.\n\n"
     
-    if budget['notes']:
-        text += f"\n📝 Примечания:\n{budget['notes']}"
+    text += f"{balance_emoji} Баланс: {balance:,.2f} руб."
+    
+    if budget.get('notes'):
+        text += f"\n\n📝 Примечания: {budget['notes']}"
     
     keyboard = [
-        [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_budget_{budget_id}")],
-        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_budget_{budget_id}")],
-        [InlineKeyboardButton(text="❌ Закрыть", callback_data="cancel")]
+        [InlineKeyboardButton(text="✏️ Редактировать категорию", callback_data=f"edit_budget_cat_{budget_id}")],
+        [InlineKeyboardButton(text="🗑 Удалить бюджет", callback_data=f"delete_budget_{budget_id}")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_budgets")]
     ]
     
     await callback.message.edit_text(
@@ -1436,3 +1795,117 @@ async def process_delete_expense_id(message: types.Message, state: FSMContext):
     ok = db.delete_expense(message.from_user.id, expense_id)
     await state.clear()
     await message.answer("✅ Расход удалён." if ok else "❌ Не удалось удалить: запись не найдена или не ваша.")
+
+async def edit_budget_category_start(callback: types.CallbackQuery, state: FSMContext):
+    """Начало редактирования отдельной категории бюджета"""
+    budget_id = int(callback.data.split("_")[-1])
+    
+    conn = sqlite3.connect('financial_bot.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM budget_plans WHERE id = ?", (budget_id,))
+    budget = cursor.fetchone()
+    conn.close()
+    
+    if not budget:
+        await callback.answer("Бюджет не найден", show_alert=True)
+        return
+    
+    budget = dict(budget)
+    user_id = budget['user_id']
+    
+    import json
+    income_cats = json.loads(budget['income_categories']) if budget.get('income_categories') else {}
+    expense_cats = json.loads(budget['expense_categories']) if budget.get('expense_categories') else {}
+    
+    all_cats = db.get_user_categories(user_id)
+    cat_names = {c['id']: c['name'] for c in all_cats}
+    
+    keyboard = []
+    
+    text = "Выберите категорию для редактирования:\n\n💰 Доходы:\n"
+    
+    for cat_id_str, amount in income_cats.items():
+        cat_id = int(cat_id_str)
+        cat_name = cat_names.get(cat_id, "Неизвестно")
+        text += f"  • {cat_name}: {amount:,.2f} руб.\n"
+        keyboard.append([InlineKeyboardButton(
+            text=f"✏️ {cat_name} ({amount:,.0f} руб.)",
+            callback_data=f"editcat_income_{budget_id}_{cat_id}"
+        )])
+    
+    text += "\n🛒 Расходы:\n"
+    
+    for cat_id_str, amount in expense_cats.items():
+        cat_id = int(cat_id_str)
+        cat_name = cat_names.get(cat_id, "Неизвестно")
+        text += f"  • {cat_name}: {amount:,.2f} руб.\n"
+        keyboard.append([InlineKeyboardButton(
+            text=f"✏️ {cat_name} ({amount:,.0f} руб.)",
+            callback_data=f"editcat_expense_{budget_id}_{cat_id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"view_budget_{budget_id}")])
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+
+async def edit_specific_category(callback: types.CallbackQuery, state: FSMContext):
+    """Редактирование конкретной категории"""
+    parts = callback.data.split("_")
+    cat_type = parts[1]
+    budget_id = int(parts[2])
+    category_id = int(parts[3])
+    
+    # Получаем название категории
+    all_cats = db.get_user_categories(callback.from_user.id)
+    cat_name = next((c['name'] for c in all_cats if c['id'] == category_id), "Неизвестная")
+    
+    await state.update_data(
+        edit_budget_id=budget_id,
+        edit_category_id=category_id,
+        edit_category_type=cat_type
+    )
+    
+    await callback.message.edit_text(
+        f"Редактирование категории: {cat_name}\n\nВведите новую сумму (в рублях):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"view_budget_{budget_id}")]
+        ])
+    )
+    
+    await state.set_state(BudgetStates.waiting_edited_category_amount)
+
+
+async def process_edited_category_amount(message: types.Message, state: FSMContext):
+    """Обработка новой суммы для категории"""
+    try:
+        new_amount = float(message.text.replace(",", "."))
+        
+        data = await state.get_data()
+        budget_id = data['edit_budget_id']
+        category_id = data['edit_category_id']
+        cat_type = data['edit_category_type']
+        
+        # Обновляем категорию
+        success = db.update_budget_category(budget_id, cat_type, category_id, new_amount)
+        
+        if success:
+            await message.answer(
+                f"✅ Сумма категории обновлена: {new_amount:,.2f} руб.",
+                reply_markup=get_budget_menu_keyboard()
+            )
+        else:
+            await message.answer(
+                "❌ Ошибка при обновлении",
+                reply_markup=get_budget_menu_keyboard()
+            )
+        
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ Неверный формат! Введите число, например: 50000")
