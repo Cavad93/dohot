@@ -546,3 +546,53 @@ class Database:
         if row:
             return dict(zip(columns, row))
         return None
+        
+    # -------- Удаление дохода --------
+    def delete_income(self, user_id: int, income_id: int) -> bool:
+        """Удаляет доход по ID, проверяя владельца.
+        Returns True если удалено, False если записи нет или не принадлежит пользователю.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM incomes WHERE id = ? AND user_id = ?", (income_id, user_id))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return deleted
+
+    def get_last_income(self, user_id: int):
+        """Возвращает последний доход пользователя (dict) или None"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""SELECT * FROM incomes WHERE user_id = ? ORDER BY id DESC LIMIT 1""", (user_id,))
+        row = cursor.fetchone()
+        columns = [d[0] for d in cursor.description] if cursor.description else []
+        conn.close()
+        if row:
+            return dict(zip(columns, row))
+        return None
+
+    # -------- Удаление расхода --------
+    def delete_expense(self, user_id: int, expense_id: int) -> bool:
+        """Удаляет расход по ID, проверяя владельца.
+        Returns True если удалено, False если записи нет или не принадлежит пользователю.
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM expenses WHERE id = ? AND user_id = ?", (expense_id, user_id))
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+        return deleted
+
+    def get_last_expense(self, user_id: int):
+        """Возвращает последний расход пользователя (dict) или None"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""SELECT * FROM expenses WHERE user_id = ? ORDER BY id DESC LIMIT 1""", (user_id,))
+        row = cursor.fetchone()
+        columns = [d[0] for d in cursor.description] if cursor.description else []
+        conn.close()
+        if row:
+            return dict(zip(columns, row))
+        return None
