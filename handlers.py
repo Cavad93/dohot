@@ -1,4 +1,5 @@
-from aiogram import types, F
+from aiogram import types, F, Router          # ← добавь Router тут
+from aiogram.filters import StateFilter 
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     InlineKeyboardMarkup, 
@@ -8,6 +9,10 @@ from aiogram.types import (
     KeyboardButton
 )
 from datetime import datetime
+
+from aiogram import Router              # ← добавь
+router = Router()                       # ← добавь
+
 
 from database import Database
 from calculations import FinancialCalculator
@@ -20,7 +25,6 @@ from bot import (
 )
 
 db = Database()
-
 
 # ==================== ОБРАБОТЧИКИ ДОЛГОВ ====================
 
@@ -964,3 +968,84 @@ async def cancel_handler(message: types.Message, state: FSMContext):
         "❌ Операция отменена",
         reply_markup=get_main_menu_keyboard()
     )
+from utils import NumberFormatter  # импорт добавлен
+
+# удалить последний доход
+async def handle_delete_last_income(message: types.Message):
+    user_id = message.from_user.id
+    last = db.get_last_income(user_id)
+    if not last:
+        await message.answer("У вас ещё нет доходов.")
+        return
+    ok = db.delete_income(user_id, last['id'])
+    if ok:
+        await message.answer(
+            f"✅ Удалён доход ID {last['id']} на сумму {NumberFormatter.format_money(last['amount'])} от {last['date']}"
+        )
+    else:
+        await message.answer("❌ Не удалось удалить: запись не найдена или не ваша.")
+
+# удалить последний расход
+async def handle_delete_last_expense(message: types.Message):
+    user_id = message.from_user.id
+    last = db.get_last_expense(user_id)
+    if not last:
+        await message.answer("У вас ещё нет расходов.")
+        return
+    ok = db.delete_expense(user_id, last['id'])
+    if ok:
+        await message.answer(
+            f"✅ Удалён расход ID {last['id']} на сумму {NumberFormatter.format_money(last['amount'])} от {last['date']}"
+        )
+    else:
+        await message.answer("❌ Не удалось удалить: запись не найдена или не ваша.")
+
+# удалить доход по ID (попросит ID и покажет последние 10 записей)
+async def handle_delete_income_by_id(message: types.Message, state: FSMContext):
+    recents = db.get_user_incomes(message.from_user.id)[:10]
+    if recents:
+        lines = ["Последние доходы:"]
+        for r in recents:
+            lines.append(
+                f"ID {r['id']}: {NumberFormatter.format_money(r['amount'])} — {r['date']} — {r['description'] or '—'}"
+            )
+        await message.answer("\n".join(lines))
+    await message.answer("Введите ID дохода для удаления:")
+    await state.set_state(IncomeStates.waiting_delete_id)
+
+# удалить расход по ID (попросит ID и покажет последние 10 записей)
+async def handle_delete_expense_by_id(message: types.Message, state: FSMContext):
+    recents = db.get_user_expenses(message.from_user.id)[:10]
+    if recents:
+        lines = ["Последние расходы:"]
+        for r in recents:
+            lines.append(
+                f"ID {r['id']}: {NumberFormatter.format_money(r['amount'])} — {r['date']} — {r['description'] or '—'}"
+            )
+        await message.answer("\n".join(lines))
+    await message.answer("Введите ID расхода для удаления:")
+    await state.set_state(ExpenseStates.waiting_delete_id)
+
+# обработка ввода ID для удаления дохода
+@router.message(StateFilter(IncomeStates.waiting_delete_id))
+async def process_delete_income_id(message: types.Message, state: FSMContext):
+    try:
+        income_id = int(message.text)
+    except ValueError:
+        await message.answer("Введите целое число ID.")
+        return
+    ok = db.delete_income(message.from_user.id, income_id)
+    await state.clear()
+    await message.answer("✅ Доход удалён." if ok else "❌ Не удалось удалить: запись не найдена или не ваша.")
+
+# обработка ввода ID для удаления расхода
+@router.message(StateFilter(ExpenseStates.waiting_delete_id))
+async def process_delete_expense_id(message: types.Message, state: FSMContext):
+    try:
+        expense_id = int(message.text)
+    except ValueError:
+        await message.answer("Введите целое число ID.")
+        return
+    ok = db.delete_expense(message.from_user.id, expense_id)
+    await state.clear()
+    await message.answer("✅ Расход удалён." if ok else "❌ Не удалось удалить: запись не найдена или не ваша.")
