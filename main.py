@@ -42,9 +42,12 @@ from handlers import (
     handle_credit_capabilities, process_capabilities_credit_selection,
     process_capability_toggle, show_user_expenses,
     start_create_budget, start_show_budgets, start_budget_forecast,
-    process_budget_month_selection, process_planned_income, process_planned_expenses,
-    view_budget_details, edit_budget_callback, delete_budget_callback,
-    confirm_delete_budget,
+    process_budget_month_selection,
+    process_income_category_selection, process_income_category_amount,
+    process_expense_category_selection, process_expense_category_amount,
+    view_budget_details, edit_budget_category_start, edit_specific_category,
+    process_edited_category_amount, delete_budget_callback,
+    confirm_delete_budget, check_expense_budget_warning,
     cancel_handler
 )
 
@@ -75,19 +78,28 @@ def register_all_handlers(dp: Dispatcher):
     )
     
     # ==================== БЮДЖЕТ ====================
+    # ==================== БЮДЖЕТ ====================
     # Меню бюджета
     dp.message.register(start_create_budget, F.text == "➕ Создать бюджет")
     dp.message.register(start_show_budgets, F.text == "📋 Мои бюджеты")
     dp.message.register(start_budget_forecast, F.text == "📊 Прогноз на 6 месяцев")
-    
-    # FSM для создания/редактирования бюджета
+
+    # FSM для создания бюджета с категориями
     dp.callback_query.register(process_budget_month_selection, BudgetStates.selecting_month)
-    dp.message.register(process_planned_income, BudgetStates.waiting_planned_income)
-    dp.message.register(process_planned_expenses, BudgetStates.waiting_planned_expenses)
-    
-    # Просмотр и редактирование бюджетов
+    dp.callback_query.register(process_income_category_selection, BudgetStates.selecting_income_categories)
+    dp.message.register(process_income_category_amount, BudgetStates.waiting_income_category_amount)
+    dp.callback_query.register(process_expense_category_selection, BudgetStates.selecting_expense_categories)
+    dp.message.register(process_expense_category_amount, BudgetStates.waiting_expense_category_amount)
+
+    # Просмотр бюджетов
     dp.callback_query.register(view_budget_details, F.data.startswith("view_budget_"))
-    dp.callback_query.register(edit_budget_callback, F.data.startswith("edit_budget_"))
+
+    # Редактирование отдельных категорий
+    dp.callback_query.register(edit_budget_category_start, F.data.startswith("edit_budget_cat_"))
+    dp.callback_query.register(edit_specific_category, F.data.startswith("editcat_"))
+    dp.message.register(process_edited_category_amount, BudgetStates.waiting_edited_category_amount)
+
+    # Удаление бюджета
     dp.callback_query.register(delete_budget_callback, F.data.startswith("delete_budget_"))
     dp.callback_query.register(confirm_delete_budget, F.data.startswith("confirm_delete_"))
 
