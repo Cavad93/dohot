@@ -550,25 +550,30 @@ class Database:
 # ==================== ПЛАНИРОВАНИЕ БЮДЖЕТА ====================
     
     def create_or_update_budget(self, user_id: int, month: int, year: int,
-                                planned_income: float = 0, planned_expenses: float = 0,
-                                credit_expenses: float = 0, custom_expenses: str = None,
-                                notes: str = None) -> int:
+                                income_categories: dict = None, expense_categories: dict = None,
+                                credit_expenses: float = 0, notes: str = None) -> int:
         """
-        Создать или обновить бюджет на месяц
+        Создать или обновить бюджет на месяц с детализацией по категориям
         
         Args:
             user_id: ID пользователя
             month: Месяц (1-12)
             year: Год
-            planned_income: Планируемый доход
-            planned_expenses: Планируемые расходы
+            income_categories: Словарь {category_id: amount} для доходов
+            expense_categories: Словарь {category_id: amount} для расходов
             credit_expenses: Расходы по кредитам
-            custom_expenses: JSON с дополнительными расходами
             notes: Примечания
         
         Returns:
             ID бюджета
         """
+        import json
+        
+        if income_categories is None:
+            income_categories = {}
+        if expense_categories is None:
+            expense_categories = {}
+        
         conn = self.get_connection()
         cursor = conn.cursor()
         
@@ -580,6 +585,14 @@ class Database:
         
         existing = cursor.fetchone()
         
+        # Конвертируем в JSON строки
+        income_json = json.dumps(income_categories)
+        expense_json = json.dumps(expense_categories)
+        
+        # Рассчитываем общие суммы
+        total_income = sum(income_categories.values())
+        total_expenses = sum(expense_categories.values())
+        
         if existing:
             # Обновляем существующий
             cursor.execute("""
@@ -589,25 +602,175 @@ class Database:
                     credit_expenses = ?,
                     custom_expenses = ?,
                     notes = ?,
+                    income_categories = ?,
+                    expense_categories = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (planned_income, planned_expenses, credit_expenses, 
-                  custom_expenses, notes, existing[0]))
+            """, (total_income, total_expenses, credit_expenses, 
+                None, notes, income_json, expense_json, existing[0]))
             budget_id = existing[0]
         else:
             # Создаем новый
             cursor.execute("""
                 INSERT INTO budget_plans (
                     user_id, month, year, planned_income, planned_expenses,
-                    credit_expenses, custom_expenses, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (user_id, month, year, planned_income, planned_expenses,
-                  credit_expenses, custom_expenses, notes))
+                    credit_expenses, custom_expenses, notes, income_categories, expense_categories
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, month, year, total_income, total_expenses,
+                credit_expenses, None, notes, income_json, expense_json))
             budget_id = cursor.lastrowid
         
         conn.commit()
         conn.close()
         return budget_id
+
+    def update_budget_category(self, budget_id: int, category_type: str, 
+                            category_id: int, amount: float) -> bool:
+        """
+        Обновить планируемую сумму для конкретной категории в бюджете
+        
+        Args:
+            budget_id: ID бюджета
+            category_type: 'income' или 'expense'
+            category_id: ID категории
+            amount: Новая сумма
+        
+        Returns:
+            True если успешно
+        """
+        import json
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Получаем текущий бюджет
+        cursor.execute("""
+            SELECT income_categories, expense_categories 
+            FROM budget_plans WHERE id = ?
+        """, (budget_id,))
+        
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False
+        
+        income_cats = json.loads(row[0]) if row[0] else {}
+        expense_cats = json.loads(row[1]) if row[1] else {}
+        
+        # Обновляем нужную категорию
+        if category_type == 'income':
+            income_cats[str(category_id)] = amount
+            new_income = sum(income_cats.values())
+            cursor.execute("""
+                UPDATE budget_plans 
+                SET income_categories = ?, planned_income = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (json.dumps(income_cats), new_income, budget_id))
+        else:
+            expense_cats[str(category_id)] = amount
+            new_expenses = sum(expense_cats.values())
+            cursor.execute("""
+                UPDATE budget_plans 
+                SET expense_categories = ?, planned_expenses = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (json.dumps(expense_cats), new_expenses, budget_id))
+        
+        conn.commit()
+        conn.close()
+        return True
+
+    def get_budget_with_categories(self, user_id: int, month: int, year: int) -> Optional[Dict]:
+        """Получить бюджет с распарсенными категориями"""
+        import json
+        
+        budget = self.get_budget(user_id, month, year)
+        if not budget:
+            return None
+        
+        # Парсим JSON строки в словари
+        if budget.get('income_categories'):
+            budget['income_categories'] = json.loads(budget['income_categories'])
+        else:
+            budget['income_categories'] = {}
+        
+        if budget.get('expense_categories'):
+            budget['expense_categories'] = json.loads(budget['expense_categories'])
+        else:
+            budget['expense_categories'] = {}
+        
+        return budget
+
+    def check_expense_against_budget(self, user_id: int, category_id: int, 
+                                    amount: float, expense_date: str) -> Dict:
+        """
+        Проверяет расход на соответствие бюджету
+        
+        Returns:
+            Dict с информацией: {
+                'has_budget': bool,
+                'category_in_budget': bool,
+                'spent_before': float,
+                'planned': float,
+                'spent_after': float,
+                'percent_used': float,
+                'over_budget': bool
+            }
+        """
+        import json
+        from datetime import datetime
+        
+        # Определяем месяц и год из даты расхода
+        date_obj = datetime.strptime(expense_date, '%Y-%m-%d')
+        month = date_obj.month
+        year = date_obj.year
+        
+        # Получаем бюджет
+        budget = self.get_budget(user_id, month, year)
+        
+        result = {
+            'has_budget': False,
+            'category_in_budget': False,
+            'spent_before': 0,
+            'planned': 0,
+            'spent_after': 0,
+            'percent_used': 0,
+            'over_budget': False
+        }
+        
+        if not budget:
+            return result
+        
+        result['has_budget'] = True
+        
+        # Парсим категории расходов из бюджета
+        expense_cats = json.loads(budget['expense_categories']) if budget.get('expense_categories') else {}
+        
+        # Проверяем есть ли эта категория в бюджете
+        cat_key = str(category_id)
+        if cat_key not in expense_cats:
+            return result
+        
+        result['category_in_budget'] = True
+        result['planned'] = expense_cats[cat_key]
+        
+        # Считаем сколько уже потрачено по этой категории за месяц (до добавления нового расхода)
+        start_date = f"{year}-{month:02d}-01"
+        if month == 12:
+            end_date = f"{year + 1}-01-01"
+        else:
+            end_date = f"{year}-{month + 1:02d}-01"
+        
+        expenses = self.get_user_expenses(user_id, start_date, end_date)
+        spent = sum(e['amount'] for e in expenses if e.get('category_id') == category_id)
+        
+        result['spent_before'] = spent
+        result['spent_after'] = spent + amount
+        
+        if result['planned'] > 0:
+            result['percent_used'] = (result['spent_after'] / result['planned']) * 100
+            result['over_budget'] = result['spent_after'] > result['planned']
+        
+        return result
     
     def get_budget(self, user_id: int, month: int, year: int) -> Optional[Dict]:
         """Получить бюджет на месяц"""
@@ -707,3 +870,57 @@ class Database:
         if row:
             return dict(zip(columns, row))
         return None
+
+    def suggest_budget_categories(self, user_id: int, lookback_months: int = 3) -> Dict:
+        """
+        Предлагает категории и суммы для бюджета на основе истории
+        
+        Args:
+            user_id: ID пользователя
+            lookback_months: Сколько месяцев назад анализировать
+        
+        Returns:
+            Dict с предложениями: {
+                'income': {category_id: avg_amount},
+                'expense': {category_id: avg_amount}
+            }
+        """
+        from datetime import datetime, timedelta
+        from collections import defaultdict
+        
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=lookback_months * 30)
+        
+        start_str = start_date.strftime('%Y-%m-%d')
+        end_str = end_date.strftime('%Y-%m-%d')
+        
+        # Получаем доходы и расходы за период
+        incomes = self.get_user_incomes(user_id, start_str, end_str)
+        expenses = self.get_user_expenses(user_id, start_str, end_str)
+        
+        # Группируем по категориям и считаем средние
+        income_by_cat = defaultdict(list)
+        for inc in incomes:
+            if inc.get('category_id'):
+                income_by_cat[inc['category_id']].append(inc['amount'])
+        
+        expense_by_cat = defaultdict(list)
+        for exp in expenses:
+            if exp.get('category_id'):
+                expense_by_cat[exp['category_id']].append(exp['amount'])
+        
+        # Считаем средние значения
+        suggested_income = {
+            cat_id: sum(amounts) / lookback_months 
+            for cat_id, amounts in income_by_cat.items()
+        }
+        
+        suggested_expense = {
+            cat_id: sum(amounts) / lookback_months 
+            for cat_id, amounts in expense_by_cat.items()
+        }
+        
+        return {
+            'income': suggested_income,
+            'expense': suggested_expense
+        }
