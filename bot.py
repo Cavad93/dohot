@@ -34,15 +34,18 @@ class CreditStates(StatesGroup):
     waiting_remaining_debt = State()
     waiting_start_date = State()
     
-    selecting_credit = State()
-    entering_payment_amount = State()
+    # Для обновления возможностей кредита
+    selecting_credit_for_capabilities = State()
+    updating_capabilities = State()
     
+    # Для внесения платежа
+    selecting_credit_for_payment = State()
+    confirming_payment = State()
+    
+    # Для досрочного погашения
     selecting_credit_for_early = State()
     entering_early_amount = State()
     selecting_early_type = State()
-    
-    selecting_credit_for_capabilities = State()
-    selecting_capability = State()
 
 
 class CreditCardStates(StatesGroup):
