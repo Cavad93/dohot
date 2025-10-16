@@ -1,3 +1,4 @@
+import logging
 from aiogram import types, F, Router
 from aiogram.filters import StateFilter 
 from aiogram.fsm.context import FSMContext
@@ -12,6 +13,8 @@ from datetime import datetime
 import calendar
 import sqlite3
 import asyncio
+
+logger = logging.getLogger(__name__)
 
 from aiogram import Router
 router = Router()
