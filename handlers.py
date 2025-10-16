@@ -1495,6 +1495,136 @@ async def finalize_budget_creation(message: types.Message, state: FSMContext, us
     await message.answer(result_text, reply_markup=get_budget_menu_keyboard())
 
 
+# ==================== АНАЛИТИКА ====================
+
+async def show_analytics_menu(message: types.Message):
+    """Показать меню аналитики"""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📊 Подробный отчёт")],
+            [KeyboardButton(text="📈 Все графики"), KeyboardButton(text="💹 График баланса")],
+            [KeyboardButton(text="🥧 Диаграмма расходов"), KeyboardButton(text="📉 График кредитов")],
+            [KeyboardButton(text="🔙 Главное меню")]
+        ],
+        resize_keyboard=True
+    )
+    
+    await message.answer(
+        "📊 РАСШИРЕННАЯ АНАЛИТИКА\n\n"
+        "Выберите тип отчёта:\n"
+        "• Подробный отчёт - полный текстовый анализ\n"
+        "• Все графики - комплект из 6+ графиков\n"
+        "• График баланса - динамика доходов/расходов\n"
+        "• Диаграмма расходов - топ категорий\n"
+        "• График кредитов - план погашения",
+        reply_markup=keyboard
+    )
+
+
+async def generate_detailed_analytics(message: types.Message):
+    """Генерирует детальный аналитический отчёт"""
+    from analytics import FinancialAnalytics
+    from database import Database
+    
+    await message.answer("⏳ Анализирую ваши финансы... Это займёт несколько секунд.")
+    
+    try:
+        db = Database()
+        analytics = FinancialAnalytics(db)
+        
+        # Генерируем отчёт
+        report = analytics.generate_comprehensive_report(message.from_user.id, period_days=30)
+        
+        # Разбиваем на части если слишком длинный
+        max_length = 4000
+        if len(report) > max_length:
+            parts = []
+            current_part = ""
+            
+            for line in report.split('\n'):
+                if len(current_part) + len(line) + 1 > max_length:
+                    parts.append(current_part)
+                    current_part = line + '\n'
+                else:
+                    current_part += line + '\n'
+            
+            if current_part:
+                parts.append(current_part)
+            
+            # Отправляем по частям
+            for i, part in enumerate(parts):
+                await message.answer(part)
+                if i < len(parts) - 1:
+                    await asyncio.sleep(0.5)  # Небольшая задержка между сообщениями
+        else:
+            await message.answer(report)
+        
+        await message.answer(
+            "✅ Анализ завершён!\n\n"
+            "💡 Для получения графиков используйте кнопки меню аналитики.",
+            reply_markup=get_analytics_keyboard()
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating analytics: {e}")
+        await message.answer(
+            "❌ Произошла ошибка при генерации отчёта.\n"
+            "Попробуйте позже или обратитесь к администратору."
+        )
+
+
+async def generate_all_charts(message: types.Message):
+    """Генерирует все графики"""
+    from visualization import ChartGenerator
+    from database import Database
+    
+    await message.answer("📊 Создаю графики... Подождите немного.")
+    
+    try:
+        db = Database()
+        chart_gen = ChartGenerator()
+        
+        charts = chart_gen.generate_full_financial_dashboard(message.from_user.id, db)
+        
+        if charts:
+            await message.answer(f"✅ Создано {len(charts)} графиков!")
+            
+            for i, chart_path in enumerate(charts, 1):
+                photo = types.FSInputFile(chart_path)
+                await message.answer_photo(
+                    photo=photo,
+                    caption=f"График {i} из {len(charts)}"
+                )
+                await asyncio.sleep(0.3)  # Задержка между отправками
+            
+            await message.answer(
+                "📊 Все графики отправлены!",
+                reply_markup=get_analytics_keyboard()
+            )
+        else:
+            await message.answer(
+                "⚠️ Недостаточно данных для создания графиков.\n"
+                "Добавьте доходы, расходы и другую финансовую информацию."
+            )
+            
+    except Exception as e:
+        logger.error(f"Error generating charts: {e}")
+        await message.answer("❌ Ошибка при создании графиков.")
+
+
+def get_analytics_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура меню аналитики"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📊 Подробный отчёт")],
+            [KeyboardButton(text="📈 Все графики"), KeyboardButton(text="💹 График баланса")],
+            [KeyboardButton(text="🥧 Диаграмма расходов"), KeyboardButton(text="📉 График кредитов")],
+            [KeyboardButton(text="🔙 Главное меню")]
+        ],
+        resize_keyboard=True
+    )
+
+
 async def show_user_budgets(message: types.Message):
     """Показ списка бюджетов пользователя"""
     budgets = db.get_user_budgets(message.from_user.id)
