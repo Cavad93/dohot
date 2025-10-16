@@ -187,6 +187,28 @@ class Migration006_AddBudgetPlanning(Migration):
         conn.commit()
         print(f"✅ Migration {self.version}: Rolled back")
 
+class Migration007_BudgetCategoriesSupport(Migration):
+    """Добавляет поддержку категорий в бюджете"""
+    
+    def __init__(self):
+        super().__init__(7, "Add budget categories support")
+    
+    def up(self, conn: sqlite3.Connection):
+        cursor = conn.cursor()
+        
+        # Добавляем поля для хранения категорий доходов и расходов
+        try:
+            cursor.execute("ALTER TABLE budget_plans ADD COLUMN income_categories TEXT")
+            cursor.execute("ALTER TABLE budget_plans ADD COLUMN expense_categories TEXT")
+        except sqlite3.OperationalError:
+            pass
+        
+        conn.commit()
+        print(f"✅ Migration {self.version}: {self.description} - applied")
+    
+    def down(self, conn: sqlite3.Connection):
+        print(f"⚠️  Migration {self.version}: Rollback not supported (SQLite limitation)")
+
 
 class MigrationManager:
     """Менеджер миграций"""
@@ -195,11 +217,12 @@ class MigrationManager:
         self.db_path = db_path
         self.migrations: List[Migration] = [
             Migration001_InitialSchema(),
-            Migration002_AddCreditNotes(),
-            Migration003_AddCategoryIcons(),
-            Migration004_AddPaymentReminders(),
+            Migration002_AddCreditFields(),
+            Migration003_AddDebtFields(),
+            Migration004_AddUserPreferences(),
             Migration005_AddRecurringTransactions(),
             Migration006_AddBudgetPlanning(),
+            Migration007_BudgetCategoriesSupport(),
         ]
         self._ensure_migrations_table()
     
