@@ -219,6 +219,35 @@ async def handle_add_category(message: types.Message, state: FSMContext, cat_typ
     )
     await state.set_state(CategoryStates.waiting_name)
 
+# Обёртки под кнопки меню
+async def start_add_income_category(message: types.Message, state: FSMContext):
+    return await handle_add_category(message, state, "income")
+
+async def start_add_expense_category(message: types.Message, state: FSMContext):
+    return await handle_add_category(message, state, "expense")
+
+async def show_user_expenses(message: types.Message):
+    """Показ последних расходов пользователя"""
+    user_id = message.from_user.id
+    expenses = db.get_user_expenses(user_id=user_id)
+
+    if not expenses:
+        await message.answer("Пока расходов нет.", reply_markup=get_income_expense_keyboard(income=False))
+        return
+
+    # подтянем имена категорий
+    cats = {c["id"]: c["name"] for c in db.get_user_categories(user_id, cat_type="expense")}
+    lines = []
+    for row in expenses[:10]:  # покажем последние 10
+        dt = row.get("date") or row.get("created_at")
+        amount = row["amount"]
+        cat_name = cats.get(row.get("category_id"), "Без категории")
+        desc = row.get("description") or ""
+        lines.append(f"• {dt} — {amount:,.2f} ₽ — {cat_name}{' — '+desc if desc else ''}")
+
+    text = "📋 Мои расходы (последние):\n\n" + "\n".join(lines)
+    await message.answer(text, reply_markup=get_income_expense_keyboard(income=False))
+
 
 async def process_category_name(message: types.Message, state: FSMContext):
     """Обработка названия категории"""
