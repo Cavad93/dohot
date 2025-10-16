@@ -139,8 +139,16 @@ def register_all_handlers(dp: Dispatcher):
     # ==================== КАТЕГОРИИ ====================
     # ==================== КАТЕГОРИИ ====================
     dp.message.register(process_category_name, CategoryStates.waiting_name)
-    dp.message.register(start_add_income_category,  F.text == "➕ Категория дохода")
-    dp.message.register(start_add_expense_category, F.text == "➕ Категория расхода")
+
+    # Регистрируем ту же функцию, но с разным cat_type через partial — обёртки не нужны
+    dp.message.register(
+        partial(handle_add_category, cat_type="income"),
+        F.text == "➕ Категория дохода"
+    )
+    dp.message.register(
+        partial(handle_add_category, cat_type="expense"),
+        F.text == "➕ Категория расхода"
+    )
 
     # ==================== РАСХОДЫ ====================
     dp.message.register(handle_add_expense, F.text == "➕ Добавить расход")
