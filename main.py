@@ -36,7 +36,7 @@ from handlers import (
     handle_early_payment, process_early_credit_selection,
     process_early_payment_amount, process_early_payment_type,
     handle_credit_capabilities, process_capabilities_credit_selection,
-    process_capability_toggle,
+    process_capability_toggle, show_user_expenses,
     cancel_handler
 )
 
@@ -137,8 +137,15 @@ def register_all_handlers(dp: Dispatcher):
     )
     
     # ==================== КАТЕГОРИИ ====================
-    # TODO: Добавить обработчики для меню категорий
+    # ==================== КАТЕГОРИИ ====================
     dp.message.register(process_category_name, CategoryStates.waiting_name)
+    dp.message.register(start_add_income_category,  F.text == "➕ Категория дохода")
+    dp.message.register(start_add_expense_category, F.text == "➕ Категория расхода")
+
+    # ==================== РАСХОДЫ ====================
+    dp.message.register(handle_add_expense, F.text == "➕ Добавить расход")
+    dp.message.register(show_user_expenses, F.text == "📋 Мои расходы")
+
     
     # ==================== ДОХОДЫ ====================
     dp.message.register(handle_add_income, F.text == "➕ Добавить доход")
@@ -151,8 +158,6 @@ def register_all_handlers(dp: Dispatcher):
     )
     dp.message.register(process_income_description, IncomeStates.waiting_description)
     
-    # ==================== РАСХОДЫ ====================
-    dp.message.register(handle_add_expense, F.text == "➕ Добавить расход")
     
     # FSM для добавления расхода
     dp.message.register(process_expense_amount, ExpenseStates.waiting_amount)
