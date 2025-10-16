@@ -1,0 +1,31 @@
+[Unit]
+Description=DoHot Telegram Bot - Home Accounting Assistant
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dohot
+Group=dohot
+WorkingDirectory=/opt/dohot
+Environment="PATH=/opt/dohot/venv/bin"
+ExecStart=/opt/dohot/venv/bin/python /opt/dohot/main.py
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dohot
+
+# Limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
