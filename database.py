@@ -546,7 +546,118 @@ class Database:
         if row:
             return dict(zip(columns, row))
         return None
+
+# ==================== ПЛАНИРОВАНИЕ БЮДЖЕТА ====================
+    
+    def create_or_update_budget(self, user_id: int, month: int, year: int,
+                                planned_income: float = 0, planned_expenses: float = 0,
+                                credit_expenses: float = 0, custom_expenses: str = None,
+                                notes: str = None) -> int:
+        """
+        Создать или обновить бюджет на месяц
         
+        Args:
+            user_id: ID пользователя
+            month: Месяц (1-12)
+            year: Год
+            planned_income: Планируемый доход
+            planned_expenses: Планируемые расходы
+            credit_expenses: Расходы по кредитам
+            custom_expenses: JSON с дополнительными расходами
+            notes: Примечания
+        
+        Returns:
+            ID бюджета
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Проверяем, существует ли бюджет
+        cursor.execute("""
+            SELECT id FROM budget_plans 
+            WHERE user_id = ? AND month = ? AND year = ?
+        """, (user_id, month, year))
+        
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Обновляем существующий
+            cursor.execute("""
+                UPDATE budget_plans
+                SET planned_income = ?,
+                    planned_expenses = ?,
+                    credit_expenses = ?,
+                    custom_expenses = ?,
+                    notes = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (planned_income, planned_expenses, credit_expenses, 
+                  custom_expenses, notes, existing[0]))
+            budget_id = existing[0]
+        else:
+            # Создаем новый
+            cursor.execute("""
+                INSERT INTO budget_plans (
+                    user_id, month, year, planned_income, planned_expenses,
+                    credit_expenses, custom_expenses, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, month, year, planned_income, planned_expenses,
+                  credit_expenses, custom_expenses, notes))
+            budget_id = cursor.lastrowid
+        
+        conn.commit()
+        conn.close()
+        return budget_id
+    
+    def get_budget(self, user_id: int, month: int, year: int) -> Optional[Dict]:
+        """Получить бюджет на месяц"""
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT * FROM budget_plans
+            WHERE user_id = ? AND month = ? AND year = ?
+        """, (user_id, month, year))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return dict(row)
+        return None
+    
+    def get_user_budgets(self, user_id: int, limit: int = 12) -> List[Dict]:
+        """Получить список бюджетов пользователя"""
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT * FROM budget_plans
+            WHERE user_id = ?
+            ORDER BY year DESC, month DESC
+            LIMIT ?
+        """, (user_id, limit))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    
+    def delete_budget(self, budget_id: int) -> bool:
+        """Удалить бюджет"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("DELETE FROM budget_plans WHERE id = ?", (budget_id,))
+        deleted = cursor.rowcount > 0
+        
+        conn.commit()
+        conn.close()
+        return deleted
+
+
     # -------- Удаление дохода --------
     def delete_income(self, user_id: int, income_id: int) -> bool:
         """Удаляет доход по ID, проверяя владельца.
