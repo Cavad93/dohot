@@ -629,11 +629,18 @@ async def cancel_handler(message: types.Message, state: FSMContext):
     )
 
 
+def get_categories_menu_keyboard():
+    keyboard = [
+        [KeyboardButton(text="➕ Категория дохода")],
+        [KeyboardButton(text="➕ Категория расхода")],
+        [KeyboardButton(text="🏠 Главное меню")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 async def show_categories_menu(message: types.Message):
     """Показ меню категорий"""
-    # Простая реализация - для полной нужно добавить состояния
     await message.answer(
         "⚙️ Управление категориями\n\n"
-        "Здесь вы можете создавать категории для доходов и расходов.",
-        reply_markup=get_main_menu_keyboard()
+        "Выберите, что добавить:",
+        reply_markup=get_categories_menu_keyboard()
     )
