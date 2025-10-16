@@ -157,11 +157,11 @@ def register_all_handlers(dp: Dispatcher):
     # Callbacks для платежей
     dp.callback_query.register(
         process_credit_payment_callback,
-        StateFilter(CreditStates.selecting_credit)
+        StateFilter(CreditStates.selecting_credit_for_payment)
     )
     dp.callback_query.register(
         confirm_credit_payment,
-        StateFilter(CreditStates.entering_payment_amount)
+        StateFilter(CreditStates.confirming_payment)
     )
     
     # FSM для досрочного погашения
