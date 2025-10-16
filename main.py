@@ -7,6 +7,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from functools import partial 
 
+from handlers import router 
+
 from config import load_config
 from database import Database
 from bot import (
@@ -234,6 +236,8 @@ async def main():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
     
+    dp.include_router(router)
+
     # Регистрируем все обработчики
     register_all_handlers(dp)
     logger.info("Обработчики зарегистрированы")
